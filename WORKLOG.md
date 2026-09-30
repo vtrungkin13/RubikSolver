@@ -1,154 +1,154 @@
-# RubikSolver — Session Handoff / Development Trace
+﻿# RubikSolver â€” Session Handoff / Development Trace
 
-> **Mục đích:** Đây là file truy vết chính để tiếp tục project giữa các phiên ChatGPT/PalmBridge.
-> Mỗi phiên mới nên **đọc file này trước**, sau đó kiểm tra nhanh Git status + test nếu cần. Không cần dựa vào trí nhớ của phiên trước.
+> **Má»¥c Ä‘Ã­ch:** ÄÃ¢y lÃ  file truy váº¿t chÃ­nh Ä‘á»ƒ tiáº¿p tá»¥c project giá»¯a cÃ¡c phiÃªn ChatGPT/PalmBridge.
+> Má»—i phiÃªn má»›i nÃªn **Ä‘á»c file nÃ y trÆ°á»›c**, sau Ä‘Ã³ kiá»ƒm tra nhanh Git status + test náº¿u cáº§n. KhÃ´ng cáº§n dá»±a vÃ o trÃ­ nhá»› cá»§a phiÃªn trÆ°á»›c.
 >
 > **Project:** `D:\Coding\Python\RubikSolver`
 > **Git:** branch `main`, upstream `origin/main`
 > **Last known stable code checkpoint:** `d71dbff Complete M0-M3 foundations`
 > **Last verified test result:** `63 passed in 0.69s`
-> **Last verified API:** `POST /api/solve` với method `kociemba` hoạt động và trả `verified=true`.
+> **Last verified API:** `POST /api/solve` vá»›i method `kociemba` hoáº¡t Ä‘á»™ng vÃ  tráº£ `verified=true`.
 
 ---
 
-## 1. TRẠNG THÁI HIỆN TẠI
+## 1. TRáº NG THÃI HIá»†N Táº I
 
 ### Milestones
 
-| ID | Milestone | Trạng thái | Ghi chú |
+| ID | Milestone | Tráº¡ng thÃ¡i | Ghi chÃº |
 |---|---|---|---|
-| M0 | Bootstrap | ✅ Hoàn thành | Python package, pytest, CLI, FastAPI, frontend skeleton + API smoke tests |
-| M1 | Cube model + moves | ✅ Hoàn thành | Cubie representation + 18 moves + invariant/regression tests |
-| M2 | Scramble parser + validator | ✅ Hoàn thành | Parser/normalizer/inverse + validation edge-case tests |
-| M3 | Search foundation | ✅ Hoàn thành | IDA* + admissible heuristic + pruning + resource limits + verification tests |
-| M4 | Kociemba | ✅ Hoàn thành | Pure-Python vendored engine, solution verification |
-| M5 | CFOP | ⏳ Chưa làm | Cross → F2L → OLL → PLL |
-| M6 | Roux | ⏳ Chưa làm | FB → SB → CMLL → LSE |
-| M7 | Optimal | ⏳ Chưa làm | IDA* + pruning/PDB/symmetry |
-| M8 | Web UI hoàn chỉnh | ⏳ Chưa làm | Skeleton có sẵn; cần nối/render API đầy đủ |
+| M0 | Bootstrap | âœ… HoÃ n thÃ nh | Python package, pytest, CLI, FastAPI, frontend skeleton + API smoke tests |
+| M1 | Cube model + moves | âœ… HoÃ n thÃ nh | Cubie representation + 18 moves + invariant/regression tests |
+| M2 | Scramble parser + validator | âœ… HoÃ n thÃ nh | Parser/normalizer/inverse + validation edge-case tests |
+| M3 | Search foundation | âœ… HoÃ n thÃ nh | IDA* + admissible heuristic + pruning + resource limits + verification tests |
+| M4 | Kociemba | âœ… HoÃ n thÃ nh | Pure-Python vendored engine, solution verification |
+| M5 | CFOP | â³ ChÆ°a lÃ m | Cross â†’ F2L â†’ OLL â†’ PLL |
+| M6 | Roux | â³ ChÆ°a lÃ m | FB â†’ SB â†’ CMLL â†’ LSE |
+| M7 | Optimal | â³ ChÆ°a lÃ m | IDA* + pruning/PDB/symmetry |
+| M8 | Web UI hoÃ n chá»‰nh | â³ ChÆ°a lÃ m | Skeleton cÃ³ sáºµn; cáº§n ná»‘i/render API Ä‘áº§y Ä‘á»§ |
 
-### Ưu tiên tiếp theo
+### Æ¯u tiÃªn tiáº¿p theo
 
-**Việc nên làm ngay: M3 hoàn thiện trước khi bắt đầu M5.**
+**Viá»‡c nÃªn lÃ m ngay: M3 hoÃ n thiá»‡n trÆ°á»›c khi báº¯t Ä‘áº§u M5.**
 
-1. Viết test trực tiếp cho `DepthSearch`.
-2. Kiểm tra search giải được các scramble ngắn.
-3. Kiểm tra timeout/max-nodes/max-depth và pruning.
-4. Quyết định/wire search foundation vào architecture nếu CFOP/Optimal sẽ dùng chung.
-5. Sau khi M3 đạt acceptance, bắt đầu M5 CFOP.
+1. Viáº¿t test trá»±c tiáº¿p cho `DepthSearch`.
+2. Kiá»ƒm tra search giáº£i Ä‘Æ°á»£c cÃ¡c scramble ngáº¯n.
+3. Kiá»ƒm tra timeout/max-nodes/max-depth vÃ  pruning.
+4. Quyáº¿t Ä‘á»‹nh/wire search foundation vÃ o architecture náº¿u CFOP/Optimal sáº½ dÃ¹ng chung.
+5. Sau khi M3 Ä‘áº¡t acceptance, báº¯t Ä‘áº§u M5 CFOP.
 
-> Không coi M3 đã hoàn thành chỉ vì file `search.py` đã tồn tại.
+> KhÃ´ng coi M3 Ä‘Ã£ hoÃ n thÃ nh chá»‰ vÃ¬ file `search.py` Ä‘Ã£ tá»“n táº¡i.
 
 ---
 
-## 2. MỤC TIÊU PROJECT
+## 2. Má»¤C TIÃŠU PROJECT
 
-Xây dựng Rubik Solver 3×3 với:
+XÃ¢y dá»±ng Rubik Solver 3Ã—3 vá»›i:
 
-- Input chính: Singmaster scramble notation.
-- Cube core bằng Python.
-- Solver backend bằng Python.
-- FastAPI làm HTTP API.
-- HTML/CSS/JavaScript làm frontend.
-- Không dùng camera/ảnh/sticker input ở giai đoạn đầu.
-- Mỗi solver phải tự verify solution bằng cách apply solution lên cube đã scramble.
+- Input chÃ­nh: Singmaster scramble notation.
+- Cube core báº±ng Python.
+- Solver backend báº±ng Python.
+- FastAPI lÃ m HTTP API.
+- HTML/CSS/JavaScript lÃ m frontend.
+- KhÃ´ng dÃ¹ng camera/áº£nh/sticker input á»Ÿ giai Ä‘oáº¡n Ä‘áº§u.
+- Má»—i solver pháº£i tá»± verify solution báº±ng cÃ¡ch apply solution lÃªn cube Ä‘Ã£ scramble.
 
-Các solver mục tiêu:
+CÃ¡c solver má»¥c tiÃªu:
 
 1. CFOP
 2. Roux
 3. Kociemba / Two-Phase
 4. Optimal / God's-algorithm-style search
 
-**Lưu ý:** Optimal nghĩa là tìm solution ngắn nhất theo metric được cấu hình; không được gọi một solver nhanh là "optimal".
+**LÆ°u Ã½:** Optimal nghÄ©a lÃ  tÃ¬m solution ngáº¯n nháº¥t theo metric Ä‘Æ°á»£c cáº¥u hÃ¬nh; khÃ´ng Ä‘Æ°á»£c gá»i má»™t solver nhanh lÃ  "optimal".
 
 ---
 
-## 3. KIẾN TRÚC ĐÃ CHỐT
+## 3. KIáº¾N TRÃšC ÄÃƒ CHá»T
 
-Luồng chính:
+Luá»“ng chÃ­nh:
 
 ```
 Scramble
-   ↓
+   â†“
 Parser
-   ↓
+   â†“
 CubeState
-   ↓
+   â†“
 Validator
-   ↓
+   â†“
 SolverStrategy
-   ↓
+   â†“
 Solution
-   ↓
+   â†“
 Verification
-   ↓
+   â†“
 FastAPI / CLI / Frontend
 ```
 
-Nguyên tắc:
+NguyÃªn táº¯c:
 
-- Frontend không chứa solver logic.
-- FastAPI không chứa cube logic.
-- Solver không phụ thuộc FastAPI.
-- Cube engine dùng chung cho mọi solver.
-- Không hard-code solution theo scramble cụ thể.
-- Correctness phải được test trước optimization.
-- Solver không mutate input cube ngoài contract rõ ràng.
+- Frontend khÃ´ng chá»©a solver logic.
+- FastAPI khÃ´ng chá»©a cube logic.
+- Solver khÃ´ng phá»¥ thuá»™c FastAPI.
+- Cube engine dÃ¹ng chung cho má»i solver.
+- KhÃ´ng hard-code solution theo scramble cá»¥ thá»ƒ.
+- Correctness pháº£i Ä‘Æ°á»£c test trÆ°á»›c optimization.
+- Solver khÃ´ng mutate input cube ngoÃ i contract rÃµ rÃ ng.
 
 ---
 
-## 4. CẤU TRÚC HIỆN TẠI
+## 4. Cáº¤U TRÃšC HIá»†N Táº I
 
 ```
 RubikSolver/
-├── PROJECT_SPEC.md
-├── DEPLOYMENT.md
-├── README.md
-├── WORKLOG.md                  ← FILE TRUY VẾT NÀY
-├── THIRD_PARTY_NOTICES.md
-├── pyproject.toml
-├── api/
-│   ├── __init__.py
-│   └── main.py
-├── frontend/
-│   ├── index.html
-│   ├── style.css
-│   └── app.js
-├── src/
-│   └── rubik_solver/
-│       ├── __init__.py
-│       ├── __main__.py
-│       ├── cli.py
-│       ├── cube/
-│       │   ├── __init__.py
-│       │   ├── state.py
-│       │   ├── moves.py
-│       │   ├── parser.py
-│       │   └── validator.py
-│       ├── model/
-│       │   ├── __init__.py
-│       │   └── solution.py
-│       └── solvers/
-│           ├── __init__.py
-│           ├── base.py
-│           ├── registry.py
-│           ├── search.py
-│           ├── kociemba.py
-│           └── kociemba_engine/
-│               └── ... vendored Kociemba engine ...
-└── tests/
-    ├── test_state.py
-    ├── test_parser.py
-    ├── test_moves.py
-    ├── test_validator.py
-    ├── test_solvers.py
-    └── test_kociemba.py
+â”œâ”€â”€ PROJECT_SPEC.md
+â”œâ”€â”€ DEPLOYMENT.md
+â”œâ”€â”€ README.md
+â”œâ”€â”€ WORKLOG.md                  â† FILE TRUY Váº¾T NÃ€Y
+â”œâ”€â”€ THIRD_PARTY_NOTICES.md
+â”œâ”€â”€ pyproject.toml
+â”œâ”€â”€ api/
+â”‚   â”œâ”€â”€ __init__.py
+â”‚   â””â”€â”€ main.py
+â”œâ”€â”€ frontend/
+â”‚   â”œâ”€â”€ index.html
+â”‚   â”œâ”€â”€ style.css
+â”‚   â””â”€â”€ app.js
+â”œâ”€â”€ src/
+â”‚   â””â”€â”€ rubik_solver/
+â”‚       â”œâ”€â”€ __init__.py
+â”‚       â”œâ”€â”€ __main__.py
+â”‚       â”œâ”€â”€ cli.py
+â”‚       â”œâ”€â”€ cube/
+â”‚       â”‚   â”œâ”€â”€ __init__.py
+â”‚       â”‚   â”œâ”€â”€ state.py
+â”‚       â”‚   â”œâ”€â”€ moves.py
+â”‚       â”‚   â”œâ”€â”€ parser.py
+â”‚       â”‚   â””â”€â”€ validator.py
+â”‚       â”œâ”€â”€ model/
+â”‚       â”‚   â”œâ”€â”€ __init__.py
+â”‚       â”‚   â””â”€â”€ solution.py
+â”‚       â””â”€â”€ solvers/
+â”‚           â”œâ”€â”€ __init__.py
+â”‚           â”œâ”€â”€ base.py
+â”‚           â”œâ”€â”€ registry.py
+â”‚           â”œâ”€â”€ search.py
+â”‚           â”œâ”€â”€ kociemba.py
+â”‚           â””â”€â”€ kociemba_engine/
+â”‚               â””â”€â”€ ... vendored Kociemba engine ...
+â””â”€â”€ tests/
+    â”œâ”€â”€ test_state.py
+    â”œâ”€â”€ test_parser.py
+    â”œâ”€â”€ test_moves.py
+    â”œâ”€â”€ test_validator.py
+    â”œâ”€â”€ test_solvers.py
+    â””â”€â”€ test_kociemba.py
 ```
 
 ---
 
-## 5. CUBE MODEL — ĐÃ XÁC NHẬN
+## 5. CUBE MODEL â€” ÄÃƒ XÃC NHáº¬N
 
 ### Corners
 
@@ -180,18 +180,18 @@ RubikSolver/
 11 BR
 ```
 
-`CubeState` gồm:
+`CubeState` gá»“m:
 
-- `cp[8]` — corner permutation
-- `co[8]` — corner orientation
-- `ep[12]` — edge permutation
-- `eo[12]` — edge orientation
+- `cp[8]` â€” corner permutation
+- `co[8]` â€” corner orientation
+- `ep[12]` â€” edge permutation
+- `eo[12]` â€” edge orientation
 
-Solved state = identity permutation + orientation toàn 0.
+Solved state = identity permutation + orientation toÃ n 0.
 
 ---
 
-## 6. MOVE ENGINE — ĐÃ HOÀN THÀNH
+## 6. MOVE ENGINE â€” ÄÃƒ HOÃ€N THÃ€NH
 
 18 moves:
 
@@ -204,42 +204,42 @@ F F' F2
 B B' B2
 ```
 
-Invariant bắt buộc đã được test:
+Invariant báº¯t buá»™c Ä‘Ã£ Ä‘Æ°á»£c test:
 
-- Move + inverse → state ban đầu.
+- Move + inverse â†’ state ban Ä‘áº§u.
 - `X2 == X + X`.
 - `X4 == identity`.
-- Scramble + inverse(scramble) → solved.
+- Scramble + inverse(scramble) â†’ solved.
 
-### Bug quan trọng đã sửa
+### Bug quan trá»ng Ä‘Ã£ sá»­a
 
-Trong quá trình tích hợp Kociemba, mapping edge của **D move** bị sai.
+Trong quÃ¡ trÃ¬nh tÃ­ch há»£p Kociemba, mapping edge cá»§a **D move** bá»‹ sai.
 
-Đã sửa từ:
+ÄÃ£ sá»­a tá»«:
 
 ```
 (0,1,2,3,7,4,5,6,8,9,10,11)
 ```
 
-thành:
+thÃ nh:
 
 ```
 (0,1,2,3,5,6,7,4,8,9,10,11)
 ```
 
-Corner mapping của D giữ nguyên:
+Corner mapping cá»§a D giá»¯ nguyÃªn:
 
 ```
 (0,1,2,3,5,6,7,4)
 ```
 
-Bug này phải được coi là regression-sensitive: nếu sửa move engine sau này, phải giữ các invariant tests.
+Bug nÃ y pháº£i Ä‘Æ°á»£c coi lÃ  regression-sensitive: náº¿u sá»­a move engine sau nÃ y, pháº£i giá»¯ cÃ¡c invariant tests.
 
 ---
 
 ## 7. PARSER + VALIDATOR
 
-Parser hỗ trợ:
+Parser há»— trá»£:
 
 ```
 U D L R F B
@@ -247,28 +247,28 @@ U' D' L' R' F' B'
 U2 D2 L2 R2 F2 B2
 ```
 
-Parser phải:
+Parser pháº£i:
 
-- bỏ whitespace thừa;
-- reject token không hợp lệ;
-- giữ đúng thứ tự move;
-- tạo inverse sequence;
-- hỗ trợ normalization.
+- bá» whitespace thá»«a;
+- reject token khÃ´ng há»£p lá»‡;
+- giá»¯ Ä‘Ãºng thá»© tá»± move;
+- táº¡o inverse sequence;
+- há»— trá»£ normalization.
 
-Validator kiểm tra:
+Validator kiá»ƒm tra:
 
-- đủ/đúng 8 corners;
-- đủ/đúng 12 edges;
-- không duplicate/missing cubie;
+- Ä‘á»§/Ä‘Ãºng 8 corners;
+- Ä‘á»§/Ä‘Ãºng 12 edges;
+- khÃ´ng duplicate/missing cubie;
 - `sum(co) % 3 == 0`;
 - `sum(eo) % 2 == 0`;
-- corner/edge permutation parity phù hợp.
+- corner/edge permutation parity phÃ¹ há»£p.
 
-M2 được coi là **đã có chức năng chính**, nhưng cần hoàn thiện test coverage theo acceptance của M2/M3.
+M2 Ä‘Æ°á»£c coi lÃ  **Ä‘Ã£ cÃ³ chá»©c nÄƒng chÃ­nh**, nhÆ°ng cáº§n hoÃ n thiá»‡n test coverage theo acceptance cá»§a M2/M3.
 
 ---
 
-## 8. SEARCH FOUNDATION — ĐÃ HOÀN THÀNH
+## 8. SEARCH FOUNDATION â€” ÄÃƒ HOÃ€N THÃ€NH
 
 File:
 
@@ -276,17 +276,17 @@ File:
 src/rubik_solver/solvers/search.py
 ```
 
-Hiện có:
+Hiá»‡n cÃ³:
 
-- `DepthSearch` triển khai IDA*;
-- heuristic admissible dựa trên số cubie sai vị trí;
+- `DepthSearch` triá»ƒn khai IDA*;
+- heuristic admissible dá»±a trÃªn sá»‘ cubie sai vá»‹ trÃ­;
 - move ordering deterministic;
 - same-face pruning;
 - max depth;
 - timeout;
 - max nodes;
-- `SearchResult` gồm moves/nodes/depth/elapsed time;
-- solution verification thông qua `apply_moves` trong test suite.
+- `SearchResult` gá»“m moves/nodes/depth/elapsed time;
+- solution verification thÃ´ng qua `apply_moves` trong test suite.
 
 Heuristic:
 
@@ -297,24 +297,24 @@ max(
 )
 ```
 
-### Acceptance đã đạt
+### Acceptance Ä‘Ã£ Ä‘áº¡t
 
-- solved cube → empty solution;
-- một move → lời giải 1 move;
-- nhiều scramble ngắn → solution hợp lệ;
-- apply solution → solved;
+- solved cube â†’ empty solution;
+- má»™t move â†’ lá»i giáº£i 1 move;
+- nhiá»u scramble ngáº¯n â†’ solution há»£p lá»‡;
+- apply solution â†’ solved;
 - max-depth failure;
 - max-nodes failure;
 - timeout;
-- pruning không làm mất solution hợp lệ.
+- pruning khÃ´ng lÃ m máº¥t solution há»£p lá»‡.
 
 ### Decision
 
-`DepthSearch` được giữ làm search foundation dùng chung cho các solver cần search sau này. M3 không phải solver optimal; heuristic hiện tại chỉ đủ cho correctness/search foundation và sẽ được thay bằng pruning mạnh hơn ở M7 nếu cần.
+`DepthSearch` Ä‘Æ°á»£c giá»¯ lÃ m search foundation dÃ¹ng chung cho cÃ¡c solver cáº§n search sau nÃ y. M3 khÃ´ng pháº£i solver optimal; heuristic hiá»‡n táº¡i chá»‰ Ä‘á»§ cho correctness/search foundation vÃ  sáº½ Ä‘Æ°á»£c thay báº±ng pruning máº¡nh hÆ¡n á»Ÿ M7 náº¿u cáº§n.
 
 ---
 
-## 9. KOCIEMBA — ĐÃ HOÀN THÀNH
+## 9. KOCIEMBA â€” ÄÃƒ HOÃ€N THÃ€NH
 
 ### Implementation
 
@@ -324,16 +324,16 @@ File:
 src/rubik_solver/solvers/kociemba.py
 ```
 
-Đặc điểm:
+Äáº·c Ä‘iá»ƒm:
 
 - `KociembaSolver(Solver)`
 - method = `kociemba`
-- lazy initialization của engine tables;
-- convert `CubeState` → engine cube;
-- gọi vendored pure-Python Kociemba;
-- parse solution về move sequence của project;
-- apply solution lên scrambled cube để verify;
-- trả `Solution`.
+- lazy initialization cá»§a engine tables;
+- convert `CubeState` â†’ engine cube;
+- gá»i vendored pure-Python Kociemba;
+- parse solution vá» move sequence cá»§a project;
+- apply solution lÃªn scrambled cube Ä‘á»ƒ verify;
+- tráº£ `Solution`.
 
 Metadata:
 
@@ -346,16 +346,16 @@ Metadata:
 
 Metric: **HTM**
 
-### Test đã có
+### Test Ä‘Ã£ cÃ³
 
-`tests/test_kociemba.py` kiểm tra:
+`tests/test_kociemba.py` kiá»ƒm tra:
 
 - solved cube;
 - `R U R' F2 D`;
-- scramble dài hơn;
-- solution thực sự đưa cube về solved.
+- scramble dÃ i hÆ¡n;
+- solution thá»±c sá»± Ä‘Æ°a cube vá» solved.
 
-### Kết quả đã xác nhận
+### Káº¿t quáº£ Ä‘Ã£ xÃ¡c nháº­n
 
 Scramble:
 
@@ -363,7 +363,7 @@ Scramble:
 R U R' F2 D
 ```
 
-Solution từng chạy thành công:
+Solution tá»«ng cháº¡y thÃ nh cÃ´ng:
 
 ```
 D' L D' L D2 F2 U' R2 U R2 D' F2 L2 U' F2
@@ -373,15 +373,15 @@ D' L D' L D2 F2 U' R2 U R2 D' F2 L2 U' F2
 
 ---
 
-## 10. REGISTRY HIỆN TẠI
+## 10. REGISTRY HIá»†N Táº I
 
-Hiện solver registry đã đăng ký:
+Hiá»‡n solver registry Ä‘Ã£ Ä‘Äƒng kÃ½:
 
 ```
 kociemba -> KociembaSolver
 ```
 
-Các method còn lại chưa implementation:
+CÃ¡c method cÃ²n láº¡i chÆ°a implementation:
 
 ```
 cfop
@@ -389,11 +389,11 @@ roux
 optimal
 ```
 
-Không được giả vờ trả solution cho method chưa implement.
+KhÃ´ng Ä‘Æ°á»£c giáº£ vá» tráº£ solution cho method chÆ°a implement.
 
 ---
 
-## 11. API — ĐÃ XÁC NHẬN
+## 11. API â€” ÄÃƒ XÃC NHáº¬N
 
 Endpoint:
 
@@ -407,9 +407,9 @@ Health:
 GET /api/health
 ```
 
-Đã test thực tế bằng Uvicorn.
+ÄÃ£ test thá»±c táº¿ báº±ng Uvicorn.
 
-Request đã test:
+Request Ä‘Ã£ test:
 
 ```json
 {
@@ -418,7 +418,7 @@ Request đã test:
 }
 ```
 
-Response thực tế đã xác nhận có:
+Response thá»±c táº¿ Ä‘Ã£ xÃ¡c nháº­n cÃ³:
 
 ```
 {
@@ -436,7 +436,7 @@ Response thực tế đã xác nhận có:
 }
 ```
 
-### Lệnh chạy API
+### Lá»‡nh cháº¡y API
 
 ```powershell
 cd D:\Coding\Python\RubikSolver
@@ -451,15 +451,15 @@ http://127.0.0.1:8000/docs
 
 ---
 
-## 12. MỘT SỰ CỐ MÔI TRƯỜNG ĐÃ XỬ LÝ
+## 12. Má»˜T Sá»° Cá» MÃ”I TRÆ¯á»œNG ÄÃƒ Xá»¬ LÃ
 
-Có package ngoài:
+CÃ³ package ngoÃ i:
 
 ```
 rubik-solver-py==0.1.1
 ```
 
-Package này dùng top-level namespace `rubik_solver`, gây conflict với package của project và tạo lỗi:
+Package nÃ y dÃ¹ng top-level namespace `rubik_solver`, gÃ¢y conflict vá»›i package cá»§a project vÃ  táº¡o lá»—i:
 
 ```
 ModuleNotFoundError:
@@ -467,46 +467,46 @@ No module named 'rubik_solver.cube.moves';
 'rubik_solver.cube' is not a package
 ```
 
-Đã xử lý bằng cách uninstall package ngoài:
+ÄÃ£ xá»­ lÃ½ báº±ng cÃ¡ch uninstall package ngoÃ i:
 
 ```powershell
 python -m pip uninstall -y rubik-solver-py
 ```
 
-Kociemba engine đã được vendored vào project nên **không cần package ngoài này**.
+Kociemba engine Ä‘Ã£ Ä‘Æ°á»£c vendored vÃ o project nÃªn **khÃ´ng cáº§n package ngoÃ i nÃ y**.
 
-Sau khi uninstall đã xác nhận:
+Sau khi uninstall Ä‘Ã£ xÃ¡c nháº­n:
 
 ```
 import rubik_solver
-→ D:\Coding\Python\RubikSolver\src\rubik_solver\__init__.py
+â†’ D:\Coding\Python\RubikSolver\src\rubik_solver\__init__.py
 
 import api.main
-→ api import ok
+â†’ api import ok
 
 pytest
-→ 41 passed in 0.18s
+â†’ 41 passed in 0.18s
 ```
 
-**Không cài lại `rubik-solver-py` nếu không có lý do kiến trúc rất rõ ràng.**
+**KhÃ´ng cÃ i láº¡i `rubik-solver-py` náº¿u khÃ´ng cÃ³ lÃ½ do kiáº¿n trÃºc ráº¥t rÃµ rÃ ng.**
 
 ---
 
 ## 13. THIRD-PARTY / KOCIEMBA
 
-Kociemba engine đã được vendored vào:
+Kociemba engine Ä‘Ã£ Ä‘Æ°á»£c vendored vÃ o:
 
 ```
 src/rubik_solver/solvers/kociemba_engine/
 ```
 
-Thông tin license/source được ghi trong:
+ThÃ´ng tin license/source Ä‘Æ°á»£c ghi trong:
 
 ```
 THIRD_PARTY_NOTICES.md
 ```
 
-Dependency runtime hiện tại trong `pyproject.toml` gồm:
+Dependency runtime hiá»‡n táº¡i trong `pyproject.toml` gá»“m:
 
 - FastAPI
 - uvicorn
@@ -514,32 +514,32 @@ Dependency runtime hiện tại trong `pyproject.toml` gồm:
 - NumPy
 - httpx (dev dependency for FastAPI TestClient)
 
-Không phụ thuộc package `rubik-solver-py` bên ngoài nữa.
+KhÃ´ng phá»¥ thuá»™c package `rubik-solver-py` bÃªn ngoÃ i ná»¯a.
 
 ---
 
 ## 14. TEST BASELINE
 
-Baseline cuối cùng đã xác nhận:
+Baseline cuá»‘i cÃ¹ng Ä‘Ã£ xÃ¡c nháº­n:
 
 ```
 41 passed in 0.18s
 ```
 
-Trước mỗi milestone lớn:
+TrÆ°á»›c má»—i milestone lá»›n:
 
-1. chạy toàn bộ pytest;
-2. chạy test mới của milestone;
+1. cháº¡y toÃ n bá»™ pytest;
+2. cháº¡y test má»›i cá»§a milestone;
 3. test solution verification;
-4. nếu API liên quan thì test endpoint;
-5. kiểm tra Git diff;
-6. chỉ commit khi working tree/code ổn định.
+4. náº¿u API liÃªn quan thÃ¬ test endpoint;
+5. kiá»ƒm tra Git diff;
+6. chá»‰ commit khi working tree/code á»•n Ä‘á»‹nh.
 
 ---
 
 ## 15. GIT / CHECKPOINT
 
-Trạng thái cuối đã xác nhận:
+Tráº¡ng thÃ¡i cuá»‘i Ä‘Ã£ xÃ¡c nháº­n:
 
 ```
 branch: main
@@ -560,7 +560,7 @@ Repo:
 vtrungkin13/RubikSolver
 ```
 
-Khi bắt đầu phiên mới, luôn kiểm tra:
+Khi báº¯t Ä‘áº§u phiÃªn má»›i, luÃ´n kiá»ƒm tra:
 
 ```powershell
 cd D:\Coding\Python\RubikSolver
@@ -568,15 +568,15 @@ git status
 pytest
 ```
 
-Nếu `git status` không clean, **không được giả định code giống checkpoint này**.
+Náº¿u `git status` khÃ´ng clean, **khÃ´ng Ä‘Æ°á»£c giáº£ Ä‘á»‹nh code giá»‘ng checkpoint nÃ y**.
 
 ---
 
-## 16. KẾ HOẠCH TIẾP THEO
+## 16. Káº¾ HOáº CH TIáº¾P THEO
 
-### M3 — Search Foundation
+### M3 â€” Search Foundation
 
-**Trạng thái:** 🟡 In progress
+**Tráº¡ng thÃ¡i:** ðŸŸ¡ In progress
 
 Checklist:
 
@@ -588,22 +588,22 @@ Checklist:
 - [ ] Test max nodes.
 - [ ] Test timeout.
 - [ ] Test pruning.
-- [ ] Xác định interface dùng chung cho CFOP/Optimal.
-- [ ] Chạy full pytest.
+- [ ] XÃ¡c Ä‘á»‹nh interface dÃ¹ng chung cho CFOP/Optimal.
+- [ ] Cháº¡y full pytest.
 - [ ] Commit milestone.
 
 **Acceptance:**
 
-> Search giải được các scramble ngắn và tự verify solution.
+> Search giáº£i Ä‘Æ°á»£c cÃ¡c scramble ngáº¯n vÃ  tá»± verify solution.
 
 ---
 
-### M5 — CFOP
+### M5 â€” CFOP
 
 Sau khi M3 pass:
 
 #### Cross
-- [ ] Xác định cross target/state.
+- [ ] XÃ¡c Ä‘á»‹nh cross target/state.
 - [ ] Cross solver.
 - [ ] Cross verification.
 - [ ] Tests.
@@ -611,7 +611,7 @@ Sau khi M3 pass:
 #### F2L
 - [ ] Pair/case recognition.
 - [ ] Basic case solving.
-- [ ] Search-assisted solving nếu phù hợp.
+- [ ] Search-assisted solving náº¿u phÃ¹ há»£p.
 - [ ] F2L phase verification.
 - [ ] Tests.
 
@@ -629,60 +629,60 @@ Sau khi M3 pass:
 
 #### CFOP integration
 - [ ] `CFOPSolver`.
-- [ ] Cross → F2L → OLL → PLL.
+- [ ] Cross â†’ F2L â†’ OLL â†’ PLL.
 - [ ] Phase output.
 - [ ] Full solution verification.
 - [ ] Registry.
 - [ ] API test.
 
-**Không gọi solution là "optimal CFOP" nếu chưa có objective/search chứng minh.**
+**KhÃ´ng gá»i solution lÃ  "optimal CFOP" náº¿u chÆ°a cÃ³ objective/search chá»©ng minh.**
 
 ---
 
-### M6 — Roux
+### M6 â€” Roux
 
 ```
 First Block
-    ↓
+    â†“
 Second Block
-    ↓
+    â†“
 CMLL
-    ↓
+    â†“
 LSE
 ```
 
-Tách solver theo phase và verify từng phase.
+TÃ¡ch solver theo phase vÃ  verify tá»«ng phase.
 
 ---
 
-### M7 — Optimal
+### M7 â€” Optimal
 
-Mục tiêu:
+Má»¥c tiÃªu:
 
-- HTM trước.
+- HTM trÆ°á»›c.
 - IDA*.
 - Coordinate representation.
 - Pattern databases / pruning tables.
 - Symmetry reduction.
 - Move pruning.
-- Benchmark với scramble ngắn đã biết.
+- Benchmark vá»›i scramble ngáº¯n Ä‘Ã£ biáº¿t.
 
-**Không bắt đầu bằng brute-force thuần túy.**
+**KhÃ´ng báº¯t Ä‘áº§u báº±ng brute-force thuáº§n tÃºy.**
 
 ---
 
-### M8 — Web UI
+### M8 â€” Web UI
 
-Sau khi solver backend ổn định:
+Sau khi solver backend á»•n Ä‘á»‹nh:
 
-- [ ] Connect frontend → `POST /api/solve`.
+- [ ] Connect frontend â†’ `POST /api/solve`.
 - [ ] Loading state.
 - [ ] Error state.
 - [ ] Move count.
 - [ ] Metric.
 - [ ] Verified status.
 - [ ] Phase list.
-- [ ] Tổng solution.
+- [ ] Tá»•ng solution.
 - [ ] Copy solution.
 - [ ] Step-by-step move interaction.
 - [ ] Optional cube visualization.
@@ -690,17 +690,17 @@ Sau khi solver backend ổn định:
 
 ---
 
-## 17. QUY TẮC CHO PHIÊN CHATGPT MỚI
+## 17. QUY Táº®C CHO PHIÃŠN CHATGPT Má»šI
 
-Khi một phiên mới tiếp quản project:
+Khi má»™t phiÃªn má»›i tiáº¿p quáº£n project:
 
-### Bước 1 — Đọc file này
+### BÆ°á»›c 1 â€” Äá»c file nÃ y
 
 ```
 WORKLOG.md
 ```
 
-### Bước 2 — Kiểm tra trạng thái thực tế
+### BÆ°á»›c 2 â€” Kiá»ƒm tra tráº¡ng thÃ¡i thá»±c táº¿
 
 ```powershell
 cd D:\Coding\Python\RubikSolver
@@ -708,28 +708,28 @@ git status
 pytest
 ```
 
-Không tin tuyệt đối trạng thái ghi trong file nếu Git/test hiện tại mâu thuẫn.
+KhÃ´ng tin tuyá»‡t Ä‘á»‘i tráº¡ng thÃ¡i ghi trong file náº¿u Git/test hiá»‡n táº¡i mÃ¢u thuáº«n.
 
-### Bước 3 — Xác định task
+### BÆ°á»›c 3 â€” XÃ¡c Ä‘á»‹nh task
 
-Lấy **"KẾ HOẠCH TIẾP THEO"** làm source of truth.
+Láº¥y **"Káº¾ HOáº CH TIáº¾P THEO"** lÃ m source of truth.
 
-Nếu user yêu cầu một việc khác, ưu tiên yêu cầu mới nhưng phải cập nhật file này sau khi hoàn thành.
+Náº¿u user yÃªu cáº§u má»™t viá»‡c khÃ¡c, Æ°u tiÃªn yÃªu cáº§u má»›i nhÆ°ng pháº£i cáº­p nháº­t file nÃ y sau khi hoÃ n thÃ nh.
 
-### Bước 4 — Sau mỗi thay đổi quan trọng
+### BÆ°á»›c 4 â€” Sau má»—i thay Ä‘á»•i quan trá»ng
 
-Cập nhật:
+Cáº­p nháº­t:
 
-- trạng thái milestone;
-- việc đã hoàn thành;
-- bug/decision mới;
+- tráº¡ng thÃ¡i milestone;
+- viá»‡c Ä‘Ã£ hoÃ n thÃ nh;
+- bug/decision má»›i;
 - test result;
-- commit hash nếu đã commit;
+- commit hash náº¿u Ä‘Ã£ commit;
 - **NEXT ACTION**.
 
-### Bước 5 — Kết thúc phiên
+### BÆ°á»›c 5 â€” Káº¿t thÃºc phiÃªn
 
-Phải để lại một checkpoint đủ để phiên sau có thể tiếp tục mà không cần hỏi lại:
+Pháº£i Ä‘á»ƒ láº¡i má»™t checkpoint Ä‘á»§ Ä‘á»ƒ phiÃªn sau cÃ³ thá»ƒ tiáº¿p tá»¥c mÃ  khÃ´ng cáº§n há»i láº¡i:
 
 ```
 LAST ACTION:
@@ -752,19 +752,19 @@ NEXT ACTION:
 
 ## 18. SESSION LOG
 
-### 2026-09-30 — Kociemba/API checkpoint
+### 2026-09-30 â€” Kociemba/API checkpoint
 
-**Đã làm:**
-- Hoàn thiện Kociemba Two-Phase integration.
+**ÄÃ£ lÃ m:**
+- HoÃ n thiá»‡n Kociemba Two-Phase integration.
 - Vendored pure-Python Kociemba engine.
-- Sửa D-edge mapping bug.
-- Thêm Kociemba tests.
-- Xử lý namespace conflict với `rubik-solver-py`.
-- Uninstall package ngoài gây conflict.
-- Xác nhận API import.
-- Xác nhận `POST /api/solve` với Kociemba.
-- Xác nhận solution verification.
-- Push commit M4 lên GitHub.
+- Sá»­a D-edge mapping bug.
+- ThÃªm Kociemba tests.
+- Xá»­ lÃ½ namespace conflict vá»›i `rubik-solver-py`.
+- Uninstall package ngoÃ i gÃ¢y conflict.
+- XÃ¡c nháº­n API import.
+- XÃ¡c nháº­n `POST /api/solve` vá»›i Kociemba.
+- XÃ¡c nháº­n solution verification.
+- Push commit M4 lÃªn GitHub.
 
 **Test:**
 ```
@@ -778,90 +778,90 @@ working tree clean
 ```
 
 **NEXT ACTION:**
-> M3 Search Foundation đã hoàn thành; tiếp tục M5 CFOP.
+> M3 Search Foundation Ä‘Ã£ hoÃ n thÃ nh; tiáº¿p tá»¥c M5 CFOP.
 
 ---
 
-## 19. NEXT ACTION — LUÔN ĐỌC PHẦN NÀY TRƯỚC
+## 19. NEXT ACTION â€” LUÃ”N Äá»ŒC PHáº¦N NÃ€Y TRÆ¯á»šC
 
-**Task hiện tại: M5 — CFOP**
+**Task hiá»‡n táº¡i: M5 â€” CFOP**
 
-M0–M4 đã đạt acceptance. Việc tiếp theo:
+M0â€“M4 Ä‘Ã£ Ä‘áº¡t acceptance. Viá»‡c tiáº¿p theo:
 
-1. Thiết kế `CFOPSolver` theo phase Cross → F2L → OLL → PLL.
-2. Bắt đầu Cross solver + verification tests.
-3. Sau Cross mới triển khai F2L, OLL, PLL.
-4. Mỗi phase phải verify trạng thái trước khi chuyển phase tiếp theo.
-5. Chỉ đăng ký `cfop` vào registry khi solver có implementation thực sự.
+1. Thiáº¿t káº¿ `CFOPSolver` theo phase Cross â†’ F2L â†’ OLL â†’ PLL.
+2. Báº¯t Ä‘áº§u Cross solver + verification tests.
+3. Sau Cross má»›i triá»ƒn khai F2L, OLL, PLL.
+4. Má»—i phase pháº£i verify tráº¡ng thÃ¡i trÆ°á»›c khi chuyá»ƒn phase tiáº¿p theo.
+5. Chá»‰ Ä‘Äƒng kÃ½ `cfop` vÃ o registry khi solver cÃ³ implementation thá»±c sá»±.
 
-Không gọi solution là "optimal CFOP" nếu chưa có objective/search chứng minh.
+KhÃ´ng gá»i solution lÃ  "optimal CFOP" náº¿u chÆ°a cÃ³ objective/search chá»©ng minh.
 
 ---
 
-## 20. QUY ƯỚC CẬP NHẬT FILE NÀY
+## 20. QUY Æ¯á»šC Cáº¬P NHáº¬T FILE NÃ€Y
 
-File này là **handoff/checkpoint**, không phải tài liệu thiết kế chi tiết.
+File nÃ y lÃ  **handoff/checkpoint**, khÃ´ng pháº£i tÃ i liá»‡u thiáº¿t káº¿ chi tiáº¿t.
 
-- Thiết kế kiến trúc → `PROJECT_SPEC.md`
-- Deployment → `DEPLOYMENT.md`
-- Dependency/license → `THIRD_PARTY_NOTICES.md`
-- Tiến độ, bug, decision, test baseline, việc tiếp theo → **`WORKLOG.md`**
+- Thiáº¿t káº¿ kiáº¿n trÃºc â†’ `PROJECT_SPEC.md`
+- Deployment â†’ `DEPLOYMENT.md`
+- Dependency/license â†’ `THIRD_PARTY_NOTICES.md`
+- Tiáº¿n Ä‘á»™, bug, decision, test baseline, viá»‡c tiáº¿p theo â†’ **`WORKLOG.md`**
 
-Khi thông tin trong file này thay đổi, ưu tiên cập nhật ngay sau khi task hoàn tất thay vì để cuối nhiều phiên.
+Khi thÃ´ng tin trong file nÃ y thay Ä‘á»•i, Æ°u tiÃªn cáº­p nháº­t ngay sau khi task hoÃ n táº¥t thay vÃ¬ Ä‘á»ƒ cuá»‘i nhiá»u phiÃªn.
 
-### 2026-09-30 — Hoàn thiện M0–M3
+### 2026-09-30 â€” HoÃ n thiá»‡n M0â€“M3
 
-**Đã làm:**
-- Bổ sung API smoke tests cho M0: health, solve thành công, invalid scramble và unavailable solver.
-- Bổ sung parser/normalizer edge-case tests và validator orientation/permutation tests cho M2.
-- Nâng DepthSearch thành IDA* thực sự với threshold theo heuristic.
-- Giữ heuristic admissible dựa trên misplaced corners/edges.
-- Bổ sung same-face pruning, max-depth, max-nodes và timeout handling.
-- Bổ sung test solved/one-move/short-scramble/verification/resource-limit/pruning cho M3.
-- Cập nhật PROJECT_SPEC.md để M0–M3 có acceptance rõ ràng và đánh dấu hoàn thành.
-- Cập nhật README và Worklog; NEXT ACTION chuyển sang M5 CFOP.
+**ÄÃ£ lÃ m:**
+- Bá»• sung API smoke tests cho M0: health, solve thÃ nh cÃ´ng, invalid scramble vÃ  unavailable solver.
+- Bá»• sung parser/normalizer edge-case tests vÃ  validator orientation/permutation tests cho M2.
+- NÃ¢ng DepthSearch thÃ nh IDA* thá»±c sá»± vá»›i threshold theo heuristic.
+- Giá»¯ heuristic admissible dá»±a trÃªn misplaced corners/edges.
+- Bá»• sung same-face pruning, max-depth, max-nodes vÃ  timeout handling.
+- Bá»• sung test solved/one-move/short-scramble/verification/resource-limit/pruning cho M3.
+- Cáº­p nháº­t PROJECT_SPEC.md Ä‘á»ƒ M0â€“M3 cÃ³ acceptance rÃµ rÃ ng vÃ  Ä‘Ã¡nh dáº¥u hoÃ n thÃ nh.
+- Cáº­p nháº­t README vÃ  Worklog; NEXT ACTION chuyá»ƒn sang M5 CFOP.
 
 **Test:**
 63 passed in 0.69s
 
 **Decision:**
-M0–M3 được coi là hoàn thành. DepthSearch là search foundation, không phải Optimal solver.
+M0â€“M3 Ä‘Æ°á»£c coi lÃ  hoÃ n thÃ nh. DepthSearch lÃ  search foundation, khÃ´ng pháº£i Optimal solver.
 
 **NEXT ACTION:**
-M5 — CFOP, bắt đầu từ Cross solver + verification.
+M5 â€” CFOP, báº¯t Ä‘áº§u tá»« Cross solver + verification.
 
 Git checkpoint: d71dbff Complete M0-M3 foundations
 
-### 2026-09-30 — Chính thức hóa Project Handoff Rule
+### 2026-09-30 â€” ChÃ­nh thá»©c hÃ³a Project Handoff Rule
 
-**Đã làm:**
-- Thêm quy tắc phát triển/handoff chính thức vào `PROJECT_SPEC.md`.
-- Quy định mọi phiên mới phải đọc `WORKLOG.md` trước khi tiếp tục.
-- Quy định mọi thay đổi source code, tests, configuration hoặc architecture phải cập nhật `WORKLOG.md` trong cùng phiên.
-- Xác định `WORKLOG.md` là nguồn theo dõi tiến độ/handoff; Git và test thực tế được ưu tiên nếu mâu thuẫn.
+**ÄÃ£ lÃ m:**
+- ThÃªm quy táº¯c phÃ¡t triá»ƒn/handoff chÃ­nh thá»©c vÃ o `PROJECT_SPEC.md`.
+- Quy Ä‘á»‹nh má»i phiÃªn má»›i pháº£i Ä‘á»c `WORKLOG.md` trÆ°á»›c khi tiáº¿p tá»¥c.
+- Quy Ä‘á»‹nh má»i thay Ä‘á»•i source code, tests, configuration hoáº·c architecture pháº£i cáº­p nháº­t `WORKLOG.md` trong cÃ¹ng phiÃªn.
+- XÃ¡c Ä‘á»‹nh `WORKLOG.md` lÃ  nguá»“n theo dÃµi tiáº¿n Ä‘á»™/handoff; Git vÃ  test thá»±c táº¿ Ä‘Æ°á»£c Æ°u tiÃªn náº¿u mÃ¢u thuáº«n.
 
 **Decision:**
-> Không cần user nhắc việc cập nhật `WORKLOG.md`; đây là quy ước mặc định của project.
+> KhÃ´ng cáº§n user nháº¯c viá»‡c cáº­p nháº­t `WORKLOG.md`; Ä‘Ã¢y lÃ  quy Æ°á»›c máº·c Ä‘á»‹nh cá»§a project.
 
 **Test:**
-- Không thay đổi source code; chưa cần chạy full test suite cho thay đổi tài liệu này.
+- KhÃ´ng thay Ä‘á»•i source code; chÆ°a cáº§n cháº¡y full test suite cho thay Ä‘á»•i tÃ i liá»‡u nÃ y.
 
 **NEXT ACTION:**
-- Tiếp tục M3 — Search Foundation theo checklist hiện có.
+- Tiáº¿p tá»¥c M3 â€” Search Foundation theo checklist hiá»‡n cÃ³.
 
-### 2026-09-30 — M5 CFOP: hoàn thiện Cross phase
+### 2026-09-30 â€” M5 CFOP: hoÃ n thiá»‡n Cross phase
 
-**Đã làm:**
-- Tạo `src/rubik_solver/solvers/cfop.py` với `CrossSolver` cho phase Cross của CFOP.
-- Chọn Cross chuẩn theo D-layer: bốn edge `DR, DF, DL, DB` phải đúng vị trí và orientation.
-- Implement Cross search bằng IDA* với pruning cùng mặt liên tiếp và resource limits: max depth, max nodes, timeout.
-- Thêm exact pattern database cho abstraction 4 cross edges để heuristic là khoảng cách chính xác của Cross, thay cho heuristic yếu dựa trên số edge sai.
-- Tạo `tests/test_cfop.py` cho solved cube, single-turn cases, nhiều scramble, depth limit và node limit.
-- Chưa đăng ký `cfop` vào solver registry vì F2L/OLL/PLL chưa hoàn thành; tránh expose một solver CFOP chưa giải toàn bộ cube.
+**ÄÃ£ lÃ m:**
+- Táº¡o `src/rubik_solver/solvers/cfop.py` vá»›i `CrossSolver` cho phase Cross cá»§a CFOP.
+- Chá»n Cross chuáº©n theo D-layer: bá»‘n edge `DR, DF, DL, DB` pháº£i Ä‘Ãºng vá»‹ trÃ­ vÃ  orientation.
+- Implement Cross search báº±ng IDA* vá»›i pruning cÃ¹ng máº·t liÃªn tiáº¿p vÃ  resource limits: max depth, max nodes, timeout.
+- ThÃªm exact pattern database cho abstraction 4 cross edges Ä‘á»ƒ heuristic lÃ  khoáº£ng cÃ¡ch chÃ­nh xÃ¡c cá»§a Cross, thay cho heuristic yáº¿u dá»±a trÃªn sá»‘ edge sai.
+- Táº¡o `tests/test_cfop.py` cho solved cube, single-turn cases, nhiá»u scramble, depth limit vÃ  node limit.
+- ChÆ°a Ä‘Äƒng kÃ½ `cfop` vÃ o solver registry vÃ¬ F2L/OLL/PLL chÆ°a hoÃ n thÃ nh; trÃ¡nh expose má»™t solver CFOP chÆ°a giáº£i toÃ n bá»™ cube.
 
-**Bug/điều chỉnh trong quá trình làm:**
-- Lần chạy đầu gặp `AttributeError` do `_CrossSearch` dùng `slots=True` nhưng `nodes/started/path` chưa khai báo field; đã sửa bằng `dataclasses.field(init=False, ...)`.
-- Heuristic đầu tiên quá yếu khiến một scramble timeout sau ~752k nodes; đã thay bằng exact Cross pattern database. Bộ test Cross sau tối ưu chạy pass.
+**Bug/Ä‘iá»u chá»‰nh trong quÃ¡ trÃ¬nh lÃ m:**
+- Láº§n cháº¡y Ä‘áº§u gáº·p `AttributeError` do `_CrossSearch` dÃ¹ng `slots=True` nhÆ°ng `nodes/started/path` chÆ°a khai bÃ¡o field; Ä‘Ã£ sá»­a báº±ng `dataclasses.field(init=False, ...)`.
+- Heuristic Ä‘áº§u tiÃªn quÃ¡ yáº¿u khiáº¿n má»™t scramble timeout sau ~752k nodes; Ä‘Ã£ thay báº±ng exact Cross pattern database. Bá»™ test Cross sau tá»‘i Æ°u cháº¡y pass.
 
 **Test:**
 ```text
@@ -870,30 +870,56 @@ Full suite: 68 passed in 4.52s
 ```
 
 **Decision:**
-- Cross solver hiện là một phase solver độc lập, trả `SolutionPhase(name="Cross")` và verify trạng thái Cross sau khi giải.
-- M5 chưa hoàn thành cho tới khi có F2L → OLL → PLL và CFOPSolver giải được toàn cube.
+- Cross solver hiá»‡n lÃ  má»™t phase solver Ä‘á»™c láº­p, tráº£ `SolutionPhase(name="Cross")` vÃ  verify tráº¡ng thÃ¡i Cross sau khi giáº£i.
+- M5 chÆ°a hoÃ n thÃ nh cho tá»›i khi cÃ³ F2L â†’ OLL â†’ PLL vÃ  CFOPSolver giáº£i Ä‘Æ°á»£c toÃ n cube.
 
 **Milestone:**
-- M5 CFOP: đang thực hiện — **Cross hoàn thành**, F2L/OLL/PLL chưa làm.
+- M5 CFOP: Ä‘ang thá»±c hiá»‡n â€” **Cross hoÃ n thÃ nh**, F2L/OLL/PLL chÆ°a lÃ m.
 
 **NEXT ACTION:**
-1. Thiết kế F2L solver dựa trên từng corner-edge pair.
-2. Thêm predicate/verification cho F2L và test từng case.
-3. Sau khi F2L ổn định mới triển khai OLL.
+1. Thiáº¿t káº¿ F2L solver dá»±a trÃªn tá»«ng corner-edge pair.
+2. ThÃªm predicate/verification cho F2L vÃ  test tá»«ng case.
+3. Sau khi F2L á»•n Ä‘á»‹nh má»›i triá»ƒn khai OLL.
 
-Git: working tree đang có 2 file mới chưa commit: `src/rubik_solver/solvers/cfop.py`, `tests/test_cfop.py`.
+Git: working tree Ä‘ang cÃ³ 2 file má»›i chÆ°a commit: `src/rubik_solver/solvers/cfop.py`, `tests/test_cfop.py`.
 
-### 2026-09-30 — Chuẩn hóa charset/Unicode tiếng Việt
+### 2026-09-30 â€” Chuáº©n hÃ³a charset/Unicode tiáº¿ng Viá»‡t
 
-**Đã làm:**
-- Phát hiện `WORKLOG.md` bị trộn UTF-8 và Windows-1252 do lần ghi trước bằng PowerShell `Add-Content`.
-- Chuyển toàn bộ `WORKLOG.md` về UTF-8 thuần và sửa lại phần M5 bị mojibake.
-- Thêm `.editorconfig` với `charset = utf-8`, LF và final newline.
-- Frontend khai báo `lang="vi"` và ưu tiên font `Segoe UI`, `Noto Sans`, Arial; HTML đã có `meta charset="utf-8"`.
+**ÄÃ£ lÃ m:**
+- PhÃ¡t hiá»‡n `WORKLOG.md` bá»‹ trá»™n UTF-8 vÃ  Windows-1252 do láº§n ghi trÆ°á»›c báº±ng PowerShell `Add-Content`.
+- Chuyá»ƒn toÃ n bá»™ `WORKLOG.md` vá» UTF-8 thuáº§n vÃ  sá»­a láº¡i pháº§n M5 bá»‹ mojibake.
+- ThÃªm `.editorconfig` vá»›i `charset = utf-8`, LF vÃ  final newline.
+- Frontend khai bÃ¡o `lang="vi"` vÃ  Æ°u tiÃªn font `Segoe UI`, `Noto Sans`, Arial; HTML Ä‘Ã£ cÃ³ `meta charset="utf-8"`.
 
 **Verification:**
 - Strict UTF-8 check: OK.
 - Full test suite: `68 passed in 5.10s`.
 
 **NEXT ACTION:**
-- Tiếp tục M5 với F2L.
+- Tiáº¿p tá»¥c M5 vá»›i F2L.
+
+### 2026-09-30 â€” M5 CFOP: triá»ƒn khai F2L cÆ¡ báº£n
+
+**ÄÃ£ lÃ m:**
+- ThÃªm `F2LSolver` giáº£i láº§n lÆ°á»£t 4 corner-edge pair cá»§a F2L: DFR/FR, DLF/FL, DBL/BL, DRB/BR.
+- ThÃªm predicate `f2l_slot_solved()` vÃ  `f2l_solved()` Ä‘á»ƒ xÃ¡c nháº­n tráº¡ng thÃ¡i F2L.
+- DÃ¹ng IDA* vá»›i pattern database chÃ­nh xÃ¡c cho tá»«ng corner-edge pair lÃ m heuristic.
+- Bá»• sung Cross PDB vÃ  PDB cá»§a cÃ¡c pair Ä‘Ã£ hoÃ n thÃ nh vÃ o heuristic báº±ng phÃ©p `max`, báº£o Ä‘áº£m heuristic admissible.
+- ThÃªm transposition pruning theo `(CubeState, previous_face)` Ä‘á»ƒ trÃ¡nh duyá»‡t láº¡i tráº¡ng thÃ¡i á»Ÿ Ä‘á»™ sÃ¢u khÃ´ng tá»‘t hÆ¡n.
+- Má»—i slot Ä‘Æ°á»£c verify ngay sau khi giáº£i; Cross vÃ  cÃ¡c pair trÆ°á»›c Ä‘Ã³ pháº£i Ä‘Æ°á»£c giá»¯ nguyÃªn.
+- ChÆ°a Ä‘Äƒng kÃ½ `cfop` vÃ o registry; F2L hiá»‡n lÃ  phase solver Ä‘á»™c láº­p, OLL/PLL váº«n chÆ°a hoÃ n thÃ nh.
+
+**Test:**
+```text
+CFOP tests: 8 passed in 13.76s
+```
+
+**Decision:**
+- F2L hiá»‡n Æ°u tiÃªn correctness vÃ  verification; search dÃ¹ng toÃ n bá»™ 18 HTM moves vá»›i same-face pruning vÃ  transposition pruning.
+- ChÆ°a coi Ä‘Ã¢y lÃ  human-style F2L tá»‘i Æ°u move count; má»¥c tiÃªu hiá»‡n táº¡i lÃ  má»™t F2L phase solver Ä‘Ãºng vÃ  cÃ³ thá»ƒ verify.
+
+**NEXT ACTION:**
+1. Cháº¡y full test suite.
+2. Náº¿u toÃ n bá»™ pass, checkpoint Git cho M5 F2L.
+3. Sau Ä‘Ã³ tiáº¿p tá»¥c OLL.
+
