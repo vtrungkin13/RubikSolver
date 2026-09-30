@@ -1016,3 +1016,10 @@ Full suite: 77 passed in 14.25s
 
 **NEXT ACTION:**
 - M6 Roux.
+
+### 2026-09-30 - CFOP API long-scramble regression fix
+
+- Fixed CFOPSolver state progression when OLL/PLL returns extended notation such as r, M, or x by executing those phase moves through the vendored Kociemba engine.
+- Fixed API error handling so request parsing ValueError is not used to label internal solver failures as INVALID_SCRAMBLE.
+- Added regression coverage for the exact 20-move scramble reported through Swagger.
+- API tests: 6 passed. Full suite: 79 passed.
