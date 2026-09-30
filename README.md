@@ -2,7 +2,7 @@
 
 Python 3×3 Rubik's Cube solver with a web interface.
 
-Current stage: cube-engine bootstrap. The web/API skeleton is present, while Kociemba, CFOP, Roux and Optimal solvers will be implemented incrementally.
+Current stage: Kociemba baseline integrated. The cube engine, validation pipeline, FastAPI API, web skeleton and Kociemba Two-Phase solver are available. CFOP, Roux and Optimal will be implemented incrementally.
 
 Run tests with `pip install -e ".[dev]"` then `pytest`.
 

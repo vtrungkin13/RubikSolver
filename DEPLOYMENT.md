@@ -49,6 +49,8 @@ Toàn bộ test:
 
     pytest
 
+Bộ test hiện bao gồm cube invariants, parser/validator và Kociemba verification. Kociemba test sẽ kiểm tra solution trả về có thực sự đưa CubeState về solved hay không.
+
 Test verbose:
 
     pytest -v
@@ -69,7 +71,7 @@ Chọn method:
 
     python -m rubik_solver --method kociemba "R U R' F2"
 
-Trong giai đoạn bootstrap, một số method có thể chưa được implement hoàn chỉnh. CLI phải báo rõ solver unavailable thay vì trả về solution giả.
+Kociemba hiện đã được đăng ký trong solver registry và có thể giải scramble thực tế. CFOP, Roux và Optimal vẫn báo solver unavailable cho tới khi các phase tương ứng được triển khai.
 
 ## 6. Chạy API
 
@@ -166,7 +168,9 @@ Không commit secret hoặc machine-specific credential.
 
 ## 10. Solver resource management
 
-Kociemba và đặc biệt Optimal có thể tiêu tốn CPU/RAM đáng kể.
+Kociemba hiện dùng engine pure-Python vendored và có pruning/move tables được cache. Lần khởi tạo đầu tiên có thể chậm hơn các lần solve sau. Kociemba không đảm bảo lời giải ngắn nhất tuyệt đối.
+
+Đặc biệt Optimal có thể tiêu tốn CPU/RAM đáng kể.
 
 Production cần:
 - timeout cho request.
