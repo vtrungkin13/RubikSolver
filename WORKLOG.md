@@ -848,3 +848,37 @@ Git checkpoint: d71dbff Complete M0-M3 foundations
 
 **NEXT ACTION:**
 - Tiáº¿p tá»¥c M3 â€” Search Foundation theo checklist hiá»‡n cÃ³.
+
+### 2026-09-30 — M5 CFOP: hoàn thi?n Cross phase
+
+**Ðã làm:**
+- T?o `src/rubik_solver/solvers/cfop.py` v?i `CrossSolver` cho phase Cross c?a CFOP.
+- Ch?n Cross chu?n theo D-layer: b?n edge `DR, DF, DL, DB` ph?i dúng v? trí và orientation.
+- Implement Cross search b?ng IDA* v?i pruning cùng m?t liên ti?p và resource limits: max depth, max nodes, timeout.
+- Thêm exact pattern database cho abstraction 4 cross edges d? heuristic là kho?ng cách chính xác c?a Cross, thay cho heuristic y?u d?a trên s? edge sai.
+- T?o `tests/test_cfop.py` cho solved cube, single-turn cases, nhi?u scramble, depth limit và node limit.
+- Chua dang ký `cfop` vào solver registry vì F2L/OLL/PLL chua hoàn thành; tránh expose m?t solver CFOP chua gi?i toàn b? cube.
+
+**Bug/di?u ch?nh trong quá trình làm:**
+- L?n ch?y d?u g?p `AttributeError` do `_CrossSearch` dùng `slots=True` nhung `nodes/started/path` chua khai báo field; dã s?a b?ng `dataclasses.field(init=False, ...)`.
+- Heuristic d?u tiên quá y?u khi?n m?t scramble timeout sau ~752k nodes; dã thay b?ng exact Cross pattern database. B? test Cross sau t?i uu ch?y pass.
+
+**Test:**
+```text
+Cross tests: 5 passed in 3.85s
+Full suite: 68 passed in 4.52s
+```
+
+**Decision:**
+- Cross solver hi?n là m?t phase solver d?c l?p, tr? `SolutionPhase(name="Cross")` và verify tr?ng thái Cross sau khi gi?i.
+- M5 chua hoàn thành cho t?i khi có F2L ? OLL ? PLL và CFOPSolver gi?i du?c toàn cube.
+
+**Milestone:**
+- M5 CFOP: dang th?c hi?n — **Cross hoàn thành**, F2L/OLL/PLL chua làm.
+
+**NEXT ACTION:**
+1. Thi?t k? F2L solver d?a trên t?ng corner-edge pair.
+2. Thêm predicate/verification cho F2L và test t?ng case.
+3. Sau khi F2L ?n d?nh m?i tri?n khai OLL.
+
+Git: working tree dang có 2 file m?i chua commit: `src/rubik_solver/solvers/cfop.py`, `tests/test_cfop.py`.
