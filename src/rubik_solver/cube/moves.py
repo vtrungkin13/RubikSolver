@@ -56,8 +56,36 @@ for face, base in _BASE_MOVES.items():
     MOVES[f"{face.value}2"] = _power(base, 2)
     MOVES[f"{face.value}'"] = _power(base, 3)
 
+_EXTENDED_FACES = frozenset("MESxyzurfdlb")
+
+
+def is_extended_move(move: str) -> bool:
+    return bool(move) and move[0] in _EXTENDED_FACES
+
+
+def _apply_extended_moves(cube: CubeState, moves: tuple[str, ...]) -> CubeState:
+    """Execute an extended sequence atomically so rotations remain correct."""
+    from rubik_solver.solvers.kociemba_engine import Cube as EngineCube
+    from rubik_solver.solvers.kociemba_engine import init_solver as init_kociemba_engine
+
+    init_kociemba_engine()
+    engine_cube = EngineCube()
+    engine_cube.cp[:] = cube.cp
+    engine_cube.co[:] = cube.co
+    engine_cube.ep[:] = cube.ep
+    engine_cube.eo[:] = cube.eo
+    engine_cube.move(" ".join(moves))
+    return CubeState(
+        cp=tuple(engine_cube.cp),
+        co=tuple(engine_cube.co),
+        ep=tuple(engine_cube.ep),
+        eo=tuple(engine_cube.eo),
+    )
+
 
 def apply_move(cube: CubeState, move: str) -> CubeState:
+    if is_extended_move(move):
+        return _apply_extended_moves(cube, (move,))
     definition = MOVES.get(move)
     if definition is None:
         raise ValueError(f"Unknown move: {move}")
@@ -70,6 +98,8 @@ def apply_move(cube: CubeState, move: str) -> CubeState:
 
 
 def apply_moves(cube: CubeState, moves: list[str] | tuple[str, ...]) -> CubeState:
+    if any(is_extended_move(move) for move in moves):
+        return _apply_extended_moves(cube, tuple(moves))
     state = cube
     for move in moves:
         state = apply_move(state, move)

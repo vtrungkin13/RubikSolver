@@ -6,6 +6,8 @@ Current stage: M0–M5 complete. CFOP is integrated end-to-end as Cross → F2L 
 
 Run tests with `pip install -e ".[dev]"` then `pytest`.
 
+Scrambles accept standard and extended Singmaster notation, including slice moves (`M E S`), cube rotations (`x y z`), and wide turns (`r` or `Rw`, etc.).
+
 Run API with `uvicorn api.main:app --reload` and frontend with `python -m http.server 5500 --directory frontend`.
 
 See PROJECT_SPEC.md and DEPLOYMENT.md for architecture and deployment details.

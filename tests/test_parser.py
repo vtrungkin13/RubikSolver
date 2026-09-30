@@ -23,3 +23,22 @@ def test_normalize_scramble() -> None:
 @pytest.mark.parametrize("scramble", ["", "U", "R2 F' B D L U'"])
 def test_parse_accepts_all_moves_in_scope(scramble: str) -> None:
     assert parse_scramble(scramble) == scramble.split()
+
+
+@pytest.mark.parametrize(
+    ("scramble", "expected"),
+    [
+        ("r U r'", ["r", "U", "r'"]),
+        ("Rw U Rw'", ["r", "U", "r'"]),
+        ("M E' S2", ["M", "E'", "S2"]),
+        ("x y' z2", ["x", "y'", "z2"]),
+        ("u d f b l", ["u", "d", "f", "b", "l"]),
+    ],
+)
+def test_parse_extended_notation(scramble: str, expected: list[str]) -> None:
+    assert parse_scramble(scramble) == expected
+
+
+def test_parse_rejects_unsupported_extended_notation() -> None:
+    with pytest.raises(ValueError):
+        parse_scramble("R3")

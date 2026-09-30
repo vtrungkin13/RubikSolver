@@ -1023,3 +1023,25 @@ Full suite: 77 passed in 14.25s
 - Fixed API error handling so request parsing ValueError is not used to label internal solver failures as INVALID_SCRAMBLE.
 - Added regression coverage for the exact 20-move scramble reported through Swagger.
 - API tests: 6 passed. Full suite: 79 passed.
+
+### 2026-09-30 - Extended Singmaster notation support
+
+**Completed:**
+- Extended scramble parser to accept slice moves M E S, cube rotations x y z, lowercase wide turns r u f d l b, and Rw/Uw/Fw/Dw/Lw/Bw aliases.
+- Rw-style aliases are normalized to the engine's lowercase wide notation.
+- Extended sequences are executed atomically through the vendored Kociemba move engine so cube rotations followed by face moves preserve correct semantics.
+- apply_move and apply_moves now support extended notation while retaining the native 18-face-move engine for standard moves.
+- Added parser, inverse-sequence, move-engine, mixed-sequence, and API regression tests.
+- Updated PROJECT_SPEC.md and README.md.
+
+**Verification:**
+- Parser + move tests: 51 passed in 0.19s
+- Full suite: 93 passed in 25.19s
+- API accepts Rw U Rw' U' M2 and returns verified=true.
+
+**Decision:**
+- Extended notation is now supported at the scramble/API/core move-application layer, not only internally by CFOP OLL/PLL.
+- Supported wide-turn aliases are normalized to lowercase (Rw -> r).
+
+**NEXT ACTION:**
+- Continue with M6 Roux unless another cube-notation feature is requested.

@@ -29,6 +29,7 @@ Các hướng solver mục tiêu:
 ### In scope
 - Rubik 3×3×3 tiêu chuẩn.
 - Singmaster notation: U, D, L, R, F, B; suffix 2, '.
+- Extended Singmaster notation: M, E, S; x, y, z; lowercase wide turns and Rw/Uw/Fw/Dw/Lw/Bw aliases.
 - Scramble parser và normalizer.
 - Cube state representation dạng permutation/orientation.
 - Move engine chính xác.

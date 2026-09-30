@@ -26,6 +26,16 @@ def test_solve_endpoint_returns_verified_solution() -> None:
     assert payload["move_count"] > 0
 
 
+def test_solve_endpoint_accepts_extended_notation() -> None:
+    response = client.post(
+        "/api/solve",
+        json={"scramble": "Rw U Rw' U' M2", "method": "kociemba"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["verified"] is True
+
+
 def test_solve_endpoint_rejects_invalid_scramble() -> None:
     response = client.post(
         "/api/solve",

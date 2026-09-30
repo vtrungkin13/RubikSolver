@@ -5,7 +5,14 @@ from dataclasses import dataclass
 
 from .moves import inverse_move
 
-_MOVE_RE = re.compile(r"^[URFDLB](?:2|')?$")
+# Standard face turns plus Singmaster extended notation.
+_MOVE_RE = re.compile(r"^(?:[URFDLBMESxyzurfdlb](?:2|')?|[URFDLB](?:w|W)(?:2|')?)$")
+
+
+def _normalize_token(token: str) -> str:
+    if len(token) >= 2 and token[0] in "URFDLB" and token[1] in "wW":
+        return token[0].lower() + token[2:]
+    return token
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,7 +28,7 @@ def parse_scramble(scramble: str) -> list[str]:
     invalid = [token for token in tokens if not _MOVE_RE.fullmatch(token)]
     if invalid:
         raise ValueError("Invalid move token(s): " + ", ".join(invalid))
-    return tokens
+    return [_normalize_token(token) for token in tokens]
 
 
 def normalize_scramble(scramble: str) -> str:

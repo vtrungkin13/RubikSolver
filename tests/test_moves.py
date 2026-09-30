@@ -27,3 +27,19 @@ def test_scramble_inverse() -> None:
     scramble = parse_scramble("R U R' F2 D L2 B' U2")
     cube = apply_moves(CubeState.solved(), scramble)
     assert apply_moves(cube, inverse_sequence(scramble)).is_solved()
+
+
+@pytest.mark.parametrize(
+    "algorithm",
+    ["r U r' U'", "Rw U Rw' U'", "M2 U M2 U2", "x R x' R'", "y F y' F'", "z U z' U'"],
+)
+def test_extended_notation_sequence_and_inverse(algorithm: str) -> None:
+    moves = parse_scramble(algorithm)
+    state = apply_moves(CubeState.solved(), moves)
+    assert apply_moves(state, inverse_sequence(moves)).is_solved()
+
+
+def test_extended_notation_can_be_mixed_with_standard_moves() -> None:
+    moves = parse_scramble("r U F2 M' x R2")
+    state = apply_moves(CubeState.solved(), moves)
+    assert apply_moves(state, inverse_sequence(moves)).is_solved()
