@@ -489,6 +489,9 @@ CLI và API phải dùng cùng solver core.
 - CLI skeleton.
 - FastAPI skeleton.
 - Frontend skeleton.
+- API smoke tests.
+
+Acceptance: bootstrap artifacts tồn tại và FastAPI health/solve smoke tests pass.
 
 ### Phase 1 — Cube core
 - Canonical cubie indexing.
@@ -499,8 +502,9 @@ CLI và API phải dùng cùng solver core.
 - inverse moves.
 - solved check.
 - validator.
+- Move invariant/regression tests.
 
-Acceptance: toàn bộ invariant tests pass.
+Acceptance: toàn bộ cube invariant tests pass.
 
 ### Phase 2 — Scramble pipeline
 - Parser.
@@ -508,17 +512,21 @@ Acceptance: toàn bộ invariant tests pass.
 - Scramble → CubeState.
 - CubeState → debug representation.
 - CLI/API nhận scramble.
+- Parser/validator edge-case tests.
 
-Acceptance: scramble + inverse luôn solved.
+Acceptance: scramble + inverse luôn solved và invalid cube/scramble được phát hiện.
 
 ### Phase 3 — Search foundation
 - Generic search interface.
 - Move ordering.
 - Depth-limited search.
-- IDA* skeleton.
-- Basic pruning.
+- IDA* implementation.
+- Admissible basic heuristic.
+- Same-face pruning.
+- Max-depth, max-node và timeout limits.
+- Automatic solution verification tests.
 
-Acceptance: giải được các scramble ngắn và verify solution tự động.
+Acceptance: giải được các scramble ngắn, solution được apply về solved và resource limits hoạt động đúng.
 
 ### Phase 4 — Kociemba
 - Coordinates.
@@ -594,7 +602,27 @@ Core hoàn thành khi:
 
 ---
 
-## 22. Quyết định kiến trúc
+## 22. Quy ước phát triển và handoff
+
+### Project Handoff Rule
+
+- Mọi phiên làm việc mới phải đọc `WORKLOG.md` trước khi tiếp tục phát triển project.
+- Sau mỗi thay đổi đối với source code, tests, configuration hoặc architecture, phải cập nhật `WORKLOG.md` trong cùng phiên làm việc.
+- `WORKLOG.md` phải ghi nhận tối thiểu: thay đổi đã thực hiện, lý do/decision, kết quả test, bug hoặc vấn đề phát sinh, trạng thái milestone và **NEXT ACTION**.
+- Trạng thái thực tế của Git và test được ưu tiên hơn thông tin cũ trong `WORKLOG.md` nếu có mâu thuẫn.
+- Khi hoàn thành milestone lớn, phải cập nhật checkpoint và commit khi working tree ổn định.
+- Không cần chờ user nhắc việc cập nhật `WORKLOG.md`; đây là quy ước mặc định của project.
+
+### Tài liệu nguồn sự thật
+
+- Thiết kế và kiến trúc → `PROJECT_SPEC.md`
+- Deployment → `DEPLOYMENT.md`
+- Dependency/license → `THIRD_PARTY_NOTICES.md`
+- Tiến độ, bug, decision, test baseline, handoff và next action → `WORKLOG.md`
+
+---
+
+## 23. Quyết định kiến trúc
 
 Giữ Python làm ngôn ngữ chính cho solver:
 
@@ -628,10 +656,11 @@ Web skeleton được dựng ngay từ đầu để API contract không phải t
 
 ## Milestones
 
-M1: Cube model + moves
-M2: Scramble parser + validator
-M3: Search foundation
-M4: Kociemba solver
+M0: Bootstrap — ✅ Hoàn thành
+M1: Cube model + moves — ✅ Hoàn thành
+M2: Scramble parser + validator — ✅ Hoàn thành
+M3: Search foundation — ✅ Hoàn thành
+M4: Kociemba solver — ✅ Hoàn thành
 M5: CFOP
 M6: Roux
 M7: Optimal solver

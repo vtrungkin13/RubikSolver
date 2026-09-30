@@ -6,7 +6,7 @@
 > **Project:** `D:\Coding\Python\RubikSolver`
 > **Git:** branch `main`, upstream `origin/main`
 > **Last known commit:** `b2e6f36 Implement Kociemba two-phase solver`
-> **Last verified test result:** `41 passed in 0.18s`
+> **Last verified test result:** `63 passed in 0.69s`
 > **Last verified API:** `POST /api/solve` với method `kociemba` hoạt động và trả `verified=true`.
 
 ---
@@ -17,10 +17,10 @@
 
 | ID | Milestone | Trạng thái | Ghi chú |
 |---|---|---|---|
-| M0 | Bootstrap | ✅ Hoàn thành | Python package, pytest, CLI skeleton, FastAPI skeleton, frontend skeleton |
-| M1 | Cube model + moves | ✅ Hoàn thành | Cubie representation + 18 moves + invariant tests |
-| M2 | Scramble parser + validator | 🟡 Cơ bản hoàn thành | Parser/validator/inverse đã có; cần hoàn thiện test/search integration |
-| M3 | Search foundation | 🟡 Đang làm | `DepthSearch` đã tồn tại nhưng chưa được test/wire đầy đủ |
+| M0 | Bootstrap | ✅ Hoàn thành | Python package, pytest, CLI, FastAPI, frontend skeleton + API smoke tests |
+| M1 | Cube model + moves | ✅ Hoàn thành | Cubie representation + 18 moves + invariant/regression tests |
+| M2 | Scramble parser + validator | ✅ Hoàn thành | Parser/normalizer/inverse + validation edge-case tests |
+| M3 | Search foundation | ✅ Hoàn thành | IDA* + admissible heuristic + pruning + resource limits + verification tests |
 | M4 | Kociemba | ✅ Hoàn thành | Pure-Python vendored engine, solution verification |
 | M5 | CFOP | ⏳ Chưa làm | Cross → F2L → OLL → PLL |
 | M6 | Roux | ⏳ Chưa làm | FB → SB → CMLL → LSE |
@@ -268,7 +268,7 @@ M2 được coi là **đã có chức năng chính**, nhưng cần hoàn thiện
 
 ---
 
-## 8. SEARCH FOUNDATION — ĐANG DỞ
+## 8. SEARCH FOUNDATION — ĐÃ HOÀN THÀNH
 
 File:
 
@@ -278,15 +278,17 @@ src/rubik_solver/solvers/search.py
 
 Hiện có:
 
-- iterative/depth search;
-- heuristic dựa trên số cubie sai vị trí;
+- `DepthSearch` triển khai IDA*;
+- heuristic admissible dựa trên số cubie sai vị trí;
+- move ordering deterministic;
+- same-face pruning;
 - max depth;
 - timeout;
 - max nodes;
-- same-face pruning;
-- `SearchResult`.
+- `SearchResult` gồm moves/nodes/depth/elapsed time;
+- solution verification thông qua `apply_moves` trong test suite.
 
-Heuristic hiện tại:
+Heuristic:
 
 ```
 max(
@@ -295,24 +297,20 @@ max(
 )
 ```
 
-### Chưa hoàn thành
+### Acceptance đã đạt
 
-- Chưa có test trực tiếp đủ cho `DepthSearch`.
-- Chưa xác nhận acceptance "giải được các scramble ngắn và verify solution".
-- Chưa quyết định đầy đủ việc expose search foundation cho các solver khác.
+- solved cube → empty solution;
+- một move → lời giải 1 move;
+- nhiều scramble ngắn → solution hợp lệ;
+- apply solution → solved;
+- max-depth failure;
+- max-nodes failure;
+- timeout;
+- pruning không làm mất solution hợp lệ.
 
-### Việc tiếp theo
+### Decision
 
-Tạo tests cho ít nhất:
-
-1. solved cube → empty solution;
-2. một move → inverse move;
-3. scramble rất ngắn → solution hợp lệ;
-4. solution apply vào scramble → solved;
-5. max-depth failure;
-6. max-nodes failure;
-7. timeout;
-8. pruning không làm mất solution hợp lệ.
+`DepthSearch` được giữ làm search foundation dùng chung cho các solver cần search sau này. M3 không phải solver optimal; heuristic hiện tại chỉ đủ cho correctness/search foundation và sẽ được thay bằng pruning mạnh hơn ở M7 nếu cần.
 
 ---
 
@@ -514,6 +512,7 @@ Dependency runtime hiện tại trong `pyproject.toml` gồm:
 - uvicorn
 - Pydantic
 - NumPy
+- httpx (dev dependency for FastAPI TestClient)
 
 Không phụ thuộc package `rubik-solver-py` bên ngoài nữa.
 
@@ -779,27 +778,23 @@ working tree clean
 ```
 
 **NEXT ACTION:**
-> Hoàn thiện M3 Search Foundation bằng tests + acceptance; sau đó mới bắt đầu CFOP.
+> M3 Search Foundation đã hoàn thành; tiếp tục M5 CFOP.
 
 ---
 
 ## 19. NEXT ACTION — LUÔN ĐỌC PHẦN NÀY TRƯỚC
 
-**Task hiện tại: M3 — Search Foundation**
+**Task hiện tại: M5 — CFOP**
 
-Việc đầu tiên trong phiên tiếp theo:
+M0–M4 đã đạt acceptance. Việc tiếp theo:
 
-1. Mở `src/rubik_solver/solvers/search.py`.
-2. Mở `tests/test_solvers.py`.
-3. Kiểm tra interface `Solver`/registry.
-4. Viết test trực tiếp cho `DepthSearch`.
-5. Chạy pytest.
-6. Nếu fail, sửa implementation/test theo đúng nguyên nhân.
-7. Khi acceptance pass, cập nhật section M3 thành ✅.
-8. Commit M3.
-9. Sau đó mới bắt đầu thiết kế M5 CFOP.
+1. Thiết kế `CFOPSolver` theo phase Cross → F2L → OLL → PLL.
+2. Bắt đầu Cross solver + verification tests.
+3. Sau Cross mới triển khai F2L, OLL, PLL.
+4. Mỗi phase phải verify trạng thái trước khi chuyển phase tiếp theo.
+5. Chỉ đăng ký `cfop` vào registry khi solver có implementation thực sự.
 
-**Không nhảy sang CFOP trước khi xác nhận M3, trừ khi user yêu cầu rõ ràng.**
+Không gọi solution là "optimal CFOP" nếu chưa có objective/search chứng minh.
 
 ---
 
@@ -813,3 +808,41 @@ File này là **handoff/checkpoint**, không phải tài liệu thiết kế chi
 - Tiến độ, bug, decision, test baseline, việc tiếp theo → **`WORKLOG.md`**
 
 Khi thông tin trong file này thay đổi, ưu tiên cập nhật ngay sau khi task hoàn tất thay vì để cuối nhiều phiên.
+
+### 2026-09-30 — Hoàn thiện M0–M3
+
+**Đã làm:**
+- Bổ sung API smoke tests cho M0: health, solve thành công, invalid scramble và unavailable solver.
+- Bổ sung parser/normalizer edge-case tests và validator orientation/permutation tests cho M2.
+- Nâng DepthSearch thành IDA* thực sự với threshold theo heuristic.
+- Giữ heuristic admissible dựa trên misplaced corners/edges.
+- Bổ sung same-face pruning, max-depth, max-nodes và timeout handling.
+- Bổ sung test solved/one-move/short-scramble/verification/resource-limit/pruning cho M3.
+- Cập nhật PROJECT_SPEC.md để M0–M3 có acceptance rõ ràng và đánh dấu hoàn thành.
+- Cập nhật README và Worklog; NEXT ACTION chuyển sang M5 CFOP.
+
+**Test:**
+63 passed in 0.69s
+
+**Decision:**
+M0–M3 được coi là hoàn thành. DepthSearch là search foundation, không phải Optimal solver.
+
+**NEXT ACTION:**
+M5 — CFOP, bắt đầu từ Cross solver + verification.
+
+### 2026-09-30 — Chính thức hóa Project Handoff Rule
+
+**Đã làm:**
+- Thêm quy tắc phát triển/handoff chính thức vào `PROJECT_SPEC.md`.
+- Quy định mọi phiên mới phải đọc `WORKLOG.md` trước khi tiếp tục.
+- Quy định mọi thay đổi source code, tests, configuration hoặc architecture phải cập nhật `WORKLOG.md` trong cùng phiên.
+- Xác định `WORKLOG.md` là nguồn theo dõi tiến độ/handoff; Git và test thực tế được ưu tiên nếu mâu thuẫn.
+
+**Decision:**
+> Không cần user nhắc việc cập nhật `WORKLOG.md`; đây là quy ước mặc định của project.
+
+**Test:**
+- Không thay đổi source code; chưa cần chạy full test suite cho thay đổi tài liệu này.
+
+**NEXT ACTION:**
+- Tiếp tục M3 — Search Foundation theo checklist hiện có.
