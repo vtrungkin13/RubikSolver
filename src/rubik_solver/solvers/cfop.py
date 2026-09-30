@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from collections import deque
 from time import monotonic
 
-from rubik_solver.cube.moves import MOVES, apply_move
+from rubik_solver.cube.moves import MOVES, apply_move, apply_moves
 from rubik_solver.cube.state import CubeState
 from rubik_solver.model.solution import Solution, SolutionPhase
 from rubik_solver.solvers.base import Solver
@@ -385,3 +385,142 @@ class F2LSolver(Solver):
                 "slots": len(_F2L_SLOTS),
             },
         )
+
+
+# ---------------------------------------------------------------------------
+# OLL
+# ---------------------------------------------------------------------------
+
+
+def oll_solved(cube: CubeState) -> bool:
+    return f2l_solved(cube) and all(x == 0 for x in cube.co) and all(x == 0 for x in cube.eo)
+
+
+_OLL_EDGE_ALGORITHMS = (
+    ("F", "R", "U", "R'", "U'", "F'"),
+    ("F", "U", "R", "U'", "R'", "F'"),
+)
+
+_OLL_CORNER_ALGORITHMS = (
+    ("R", "U", "R'", "U", "R", "U2", "R'"),
+    ("R", "U2", "R'", "U'", "R", "U'", "R'"),
+    ("R", "U2", "R'", "U'", "R", "U", "R'", "U'", "R", "U'", "R'"),
+    ("R", "U2", "R2", "U'", "R2", "U'", "R2", "U2", "R"),
+    ("R2", "D", "R'", "U2", "R", "D'", "R'", "U2", "R'"),
+    ("R'", "F", "R", "B'", "R'", "F'", "R", "B"),
+    ("R", "U", "R", "D", "R'", "U'", "R", "D'", "R2"),
+)
+
+_Y_ROTATION = {"U": "U", "D": "D", "R": "B", "B": "L", "L": "F", "F": "R"}
+
+
+def _oll_stage_goal(cube: CubeState, kind: str) -> bool:
+    if not f2l_solved(cube):
+        return False
+    if kind == "edges":
+        return all(value == 0 for value in cube.eo)
+    return all(value == 0 for value in cube.eo) and all(value == 0 for value in cube.co)
+
+
+def _oll_candidate(algorithm: tuple[str, ...], rotation: int) -> tuple[str, ...]:
+    return ("U",) * rotation + algorithm
+
+
+def _oll_y_variants(algorithm: tuple[str, ...]) -> tuple[tuple[str, ...], ...]:
+    def rotate_move(move: str) -> str:
+        face = _Y_ROTATION[move[0]]
+        return face + move[1:]
+
+    variants = [algorithm]
+    current = algorithm
+    for _ in range(3):
+        current = tuple(rotate_move(move) for move in current)
+        variants.append(current)
+    return tuple(variants)
+
+
+def _solve_oll_edges(cube: CubeState) -> tuple[str, ...]:
+    if _oll_stage_goal(cube, "edges"):
+        return ()
+
+    for algorithm in _OLL_EDGE_ALGORITHMS:
+        for rotation in range(4):
+            moves = _oll_candidate(algorithm, rotation)
+            if _oll_stage_goal(apply_moves(cube, moves), "edges"):
+                return moves
+
+    for first in _OLL_EDGE_ALGORITHMS:
+        for second in _OLL_EDGE_ALGORITHMS:
+            for first_rotation in range(4):
+                for second_rotation in range(4):
+                    moves = (
+                        ("U",) * first_rotation
+                        + first
+                        + (("U",) * second_rotation)
+                        + second
+                    )
+                    if _oll_stage_goal(apply_moves(cube, moves), "edges"):
+                        return moves
+    raise RuntimeError("OLL edge-orientation case is not covered by the two-look algorithm set")
+
+
+def _solve_oll_corners(cube: CubeState) -> tuple[str, ...]:
+    if _oll_stage_goal(cube, "corners"):
+        return ()
+
+    for algorithm in _OLL_CORNER_ALGORITHMS:
+        for variant in _oll_y_variants(algorithm):
+            for rotation in range(4):
+                moves = _oll_candidate(variant, rotation)
+                if _oll_stage_goal(apply_moves(cube, moves), "corners"):
+                    return moves
+    raise RuntimeError("OLL corner-orientation case is not covered by the two-look algorithm set")
+
+
+class OLLSolver(Solver):
+    """CFOP OLL solver using a deterministic two-look algorithm set."""
+
+    method = "cfop-oll"
+
+    def __init__(
+        self,
+        *,
+        max_depth: int = 15,
+        max_nodes: int | None = 2_000_000,
+        timeout_seconds: float | None = 15.0,
+    ) -> None:
+        self.max_depth = max_depth
+        self.max_nodes = max_nodes
+        self.timeout_seconds = timeout_seconds
+
+    def solve(self, cube: CubeState) -> Solution:
+        if not f2l_solved(cube):
+            raise RuntimeError("OLL requires solved CFOP F2L")
+
+        edge_moves = _solve_oll_edges(cube)
+        after_edges = apply_moves(cube, edge_moves)
+        corner_moves = _solve_oll_corners(after_edges)
+        moves = tuple(edge_moves) + tuple(corner_moves)
+        after = apply_moves(after_edges, corner_moves)
+
+        if oll_solved(after):
+            phase = SolutionPhase(
+                name="OLL",
+                moves=moves,
+                description="Two-look OLL: orient last-layer edges, then corners while preserving F2L.",
+            )
+            return Solution(
+                method=self.method,
+                moves=moves,
+                metric="HTM",
+                verified=True,
+                phases=(phase,),
+                metadata={
+                    "algorithm": "CFOP OLL",
+                    "search": "two-look algorithm database",
+                    "depth": len(moves),
+                },
+            )
+
+
+\n

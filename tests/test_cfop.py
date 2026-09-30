@@ -98,3 +98,47 @@ def test_f2l_preserves_cross_and_previous_pairs() -> None:
         assert cross_solved(state)
         for corner, edge in ((4, 8), (5, 9), (6, 10), (7, 11))[: index + 1]:
             assert f2l_slot_solved(state, corner, edge)
+
+
+def test_oll_solves_already_oriented_f2l() -> None:
+    from rubik_solver.solvers.cfop import OLLSolver, oll_solved
+
+    result = OLLSolver().solve(CubeState.solved())
+    assert result.moves == ()
+    assert result.phases[0].name == "OLL"
+    assert result.verified is True
+    assert oll_solved(CubeState.solved())
+
+
+def test_oll_solves_sune_and_preserves_f2l() -> None:
+    from rubik_solver.solvers.cfop import OLLSolver, f2l_solved, oll_solved
+
+    cube = scrambled("R U R' U R U2 R'")
+    assert f2l_solved(cube)
+    result = OLLSolver(max_depth=15, timeout_seconds=15).solve(cube)
+    after = apply_moves(cube, result.moves)
+    assert result.verified is True
+    assert oll_solved(after)
+    assert f2l_solved(after)
+
+
+def test_oll_solves_two_look_edge_and_corner_cases() -> None:
+    from rubik_solver.solvers.cfop import OLLSolver, f2l_solved, oll_solved
+
+    cases = (
+        "F R U R' U' F'",
+        "F U R U' R' F'",
+        "R U2 R' U' R U R' U' R U' R'",
+        "R U2 R2 U' R2 U' R2 U2 R",
+        "R2 D R' U2 R D' R' U2 R'",
+        "R' F R B' R' F' R B",
+        "R U R D R' U' R D' R2",
+    )
+    solver = OLLSolver()
+    for scramble in cases:
+        cube = scrambled(scramble)
+        result = solver.solve(cube)
+        after = apply_moves(cube, result.moves)
+        assert result.verified is True
+        assert oll_solved(after)
+        assert f2l_solved(after)

@@ -5,8 +5,8 @@
 >
 > **Project:** `D:\Coding\Python\RubikSolver`
 > **Git:** branch `main`, upstream `origin/main`
-> **Last known stable code checkpoint:** `d71dbff Complete M0-M3 foundations`
-> **Last verified test result:** `63 passed in 0.69s`
+> **Last known stable code checkpoint:** M5 OLL two-look phase (latest Git commit)
+> **Last verified test result:** `74 passed in 14.43s`
 > **Last verified API:** `POST /api/solve` vá»›i method `kociemba` hoáº¡t Ä‘á»™ng vÃ  tráº£ `verified=true`.
 
 ---
@@ -22,7 +22,7 @@
 | M2 | Scramble parser + validator | âœ… HoÃ n thÃ nh | Parser/normalizer/inverse + validation edge-case tests |
 | M3 | Search foundation | âœ… HoÃ n thÃ nh | IDA* + admissible heuristic + pruning + resource limits + verification tests |
 | M4 | Kociemba | âœ… HoÃ n thÃ nh | Pure-Python vendored engine, solution verification |
-| M5 | CFOP | â³ ChÆ°a lÃ m | Cross â†’ F2L â†’ OLL â†’ PLL |
+| M5 | CFOP | Dang lam | Cross done -> F2L done -> OLL done (2-look) -> PLL pending |
 | M6 | Roux | â³ ChÆ°a lÃ m | FB â†’ SB â†’ CMLL â†’ LSE |
 | M7 | Optimal | â³ ChÆ°a lÃ m | IDA* + pruning/PDB/symmetry |
 | M8 | Web UI hoÃ n chá»‰nh | â³ ChÆ°a lÃ m | Skeleton cÃ³ sáºµn; cáº§n ná»‘i/render API Ä‘áº§y Ä‘á»§ |
@@ -922,4 +922,24 @@ CFOP tests: 8 passed in 13.76s
 1. Cháº¡y full test suite.
 2. Náº¿u toÃ n bá»™ pass, checkpoint Git cho M5 F2L.
 3. Sau Ä‘Ã³ tiáº¿p tá»¥c OLL.
+
+### 2026-09-30 - M5 CFOP: triá»ƒn khai OLL 2-look
+
+**ÄÃ£ lÃ m:**
+- ThÃªm OLLSolver sau khi F2L hoÃ n thÃ nh.
+- ThÃªm oll_solved() Ä‘á»ƒ verify F2L Ä‘Æ°á»£c giá»¯ vÃ  toÃ n bá»™ corner/edge orientation vá» 0.
+- DÃ¹ng 2-look OLL: edge orientation trÆ°á»›c, corner orientation sau.
+- Edge stage dÃ¹ng algorithm 2-look OLL + U rotations; corner stage dÃ¹ng bá»™ case OCLL khÃ´ng yÃªu cáº§u wide/slice move, kÃ¨m virtual y-rotation variants.
+- ThÃªm variant OLL 24 chá»‰ dÃ¹ng R/U/D Ä‘á»ƒ khÃ´ng phá»¥ thuá»™c wide/slice notation.
+- Solution Ä‘Æ°á»£c verify báº±ng cÃ¡ch apply vÃ o full CubeState; metadata ghi two-look algorithm database.
+- Khi thá»­ IDA* OLL, phÃ¡t hiá»‡n transposition cache pháº£i clear má»—i threshold; cache cÅ© cÃ³ thá»ƒ prune nháº§m á»Ÿ threshold sau.
+
+**Test:**
+CFOP tests: 11 passed in 13.51s
+Full suite: 74 passed in 14.08s
+
+**Decision:**
+- OLL phase hiá»‡n táº¡i lÃ  2-look OLL, khÃ´ng pháº£i full 57-case one-look OLL.
+- KhÃ´ng Ä‘Äƒng kÃ½ cfop vÃ o registry cho Ä‘áº¿n khi PLL hoÃ n thÃ nh.
+- M5 hiá»‡n cÃ³ Cross + F2L + OLL; PLL lÃ  phase tiáº¿p theo.
 
