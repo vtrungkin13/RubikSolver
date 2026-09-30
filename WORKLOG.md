@@ -5,7 +5,7 @@
 >
 > **Project:** `D:\Coding\Python\RubikSolver`
 > **Git:** branch `main`, upstream `origin/main`
-> **Last known commit:** `b2e6f36 Implement Kociemba two-phase solver`
+> **Last known stable code checkpoint:** `d71dbff Complete M0-M3 foundations`
 > **Last verified test result:** `63 passed in 0.69s`
 > **Last verified API:** `POST /api/solve` với method `kociemba` hoạt động và trả `verified=true`.
 
@@ -829,6 +829,8 @@ M0–M3 được coi là hoàn thành. DepthSearch là search foundation, không
 
 **NEXT ACTION:**
 M5 — CFOP, bắt đầu từ Cross solver + verification.
+
+Git checkpoint: d71dbff Complete M0-M3 foundations
 
 ### 2026-09-30 — Chính thức hóa Project Handoff Rule
 
