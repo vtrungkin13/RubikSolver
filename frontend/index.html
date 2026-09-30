@@ -1,0 +1,8 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>RubikSolver</title><link rel="stylesheet" href="style.css"></head>
+<body><main class="app"><header><h1>RubikSolver</h1><p>3×3 solver — Python core + FastAPI</p></header>
+<section class="panel"><label for="scramble">Scramble</label><input id="scramble" value="R U R' F2 D L2">
+<label for="method">Method</label><select id="method"><option value="cfop">CFOP</option><option value="roux">Roux</option><option value="kociemba" selected>Kociemba</option><option value="optimal">Optimal</option></select>
+<button id="solve">Solve</button><p id="status"></p></section>
+<section id="result" class="panel hidden"><div id="summary"></div><h2>Solution</h2><pre id="solution"></pre><div id="phases"></div></section></main><script src="app.js"></script></body></html>
