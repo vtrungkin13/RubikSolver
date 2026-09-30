@@ -733,7 +733,14 @@ class CFOPSolver(Solver):
 
         for solver in (self.cross_solver, self.f2l_solver, self.oll_solver, self.pll_solver):
             result = solver.solve(state)
-            state = apply_moves(state, result.moves)
+            # OLL/PLL algorithms may contain wide/slice/rotation notation
+            # (for example `r`, `M`, or `x`) which the core face-move model
+            # intentionally does not expose. Use the vendored engine as the
+            # move executor whenever a phase contains extended notation.
+            if any(len(move) > 2 or move[0] not in "URFDLB" for move in result.moves):
+                state = _apply_oll_algorithm(state, " ".join(result.moves))
+            else:
+                state = apply_moves(state, result.moves)
             phases.extend(result.phases)
             total_moves.extend(result.moves)
             phase_results.append(result)

@@ -28,20 +28,23 @@ def solve(request: SolveRequest) -> dict[str, object]:
         moves = parse_scramble(request.scramble)
         cube = apply_moves(CubeState.solved(), moves)
         validate_cube(cube)
-        solution = get_solver(request.method.lower()).solve(cube)
-        return {
-            "method": solution.method,
-            "scramble": normalize_scramble(request.scramble),
-            "moves": solution.sequence,
-            "move_count": solution.move_count,
-            "metric": solution.metric,
-            "verified": solution.verified,
-            "phases": [{"name": p.name, "moves": p.sequence, "move_count": p.move_count, "description": p.description} for p in solution.phases],
-            "metadata": solution.metadata,
-        }
     except CubeValidationError as exc:
         raise HTTPException(422, detail={"code": "INVALID_CUBE", "message": str(exc)}) from exc
     except ValueError as exc:
         raise HTTPException(422, detail={"code": "INVALID_SCRAMBLE", "message": str(exc)}) from exc
+
+    try:
+        solution = get_solver(request.method.lower()).solve(cube)
     except SolverUnavailableError as exc:
         raise HTTPException(501, detail={"code": "SOLVER_UNAVAILABLE", "message": str(exc)}) from exc
+
+    return {
+        "method": solution.method,
+        "scramble": normalize_scramble(request.scramble),
+        "moves": solution.sequence,
+        "move_count": solution.move_count,
+        "metric": solution.metric,
+        "verified": solution.verified,
+        "phases": [{"name": p.name, "moves": p.sequence, "move_count": p.move_count, "description": p.description} for p in solution.phases],
+        "metadata": solution.metadata,
+    }

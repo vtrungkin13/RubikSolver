@@ -59,3 +59,17 @@ def test_solve_endpoint_supports_cfop() -> None:
     assert [phase["name"] for phase in payload["phases"]] == [
         "Cross", "F2L-1", "F2L-2", "F2L-3", "F2L-4", "OLL", "PLL"
     ]
+
+
+def test_solve_endpoint_supports_long_cfop_scramble() -> None:
+    response = client.post(
+        "/api/solve",
+        json={
+            "scramble": "R B2 L2 D L2 D2 B2 L2 D R2 U' B2 L2 F' D' R U R U2 F' R2",
+            "method": "cfop",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["verified"] is True

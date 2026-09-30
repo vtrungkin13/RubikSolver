@@ -199,3 +199,15 @@ def test_cfop_solves_complete_scramble() -> None:
         "Cross", "F2L-1", "F2L-2", "F2L-3", "F2L-4", "OLL", "PLL"
     ]
     assert result.metadata["algorithm"] == "CFOP"
+
+
+def test_cfop_solves_extended_notation_regression_scramble() -> None:
+    from rubik_solver.solvers.cfop import CFOPSolver, _apply_oll_algorithm, pll_solved
+
+    scramble = "R B2 L2 D L2 D2 B2 L2 D R2 U' B2 L2 F' D' R U R U2 F' R2"
+    cube = scrambled(scramble)
+    result = CFOPSolver().solve(cube)
+    after = _apply_oll_algorithm(cube, " ".join(result.moves))
+
+    assert result.verified is True
+    assert pll_solved(after)
