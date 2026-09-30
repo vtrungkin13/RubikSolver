@@ -159,3 +159,24 @@ def test_oll_solves_one_look_cases() -> None:
         assert result.metadata["case"] == case_number
         assert oll_solved(after)
         assert f2l_solved(after)
+
+
+def test_pll_solves_all_21_cases() -> None:
+    from rubik_solver.solvers.cfop import (
+        PLLSolver,
+        _PLL_ALGORITHMS,
+        _apply_oll_algorithm,
+        _inverse_algorithm,
+        oll_solved,
+        pll_solved,
+    )
+
+    solver = PLLSolver()
+    for case_name, algorithm in _PLL_ALGORITHMS:
+        cube = _apply_oll_algorithm(CubeState.solved(), _inverse_algorithm(algorithm))
+        result = solver.solve(cube)
+        after = _apply_oll_algorithm(cube, " ".join(result.moves))
+        assert result.verified is True
+        assert result.metadata["case"] == case_name
+        assert oll_solved(after)
+        assert pll_solved(after)

@@ -22,7 +22,7 @@
 | M2 | Scramble parser + validator | âœ… HoÃ n thÃ nh | Parser/normalizer/inverse + validation edge-case tests |
 | M3 | Search foundation | âœ… HoÃ n thÃ nh | IDA* + admissible heuristic + pruning + resource limits + verification tests |
 | M4 | Kociemba | âœ… HoÃ n thÃ nh | Pure-Python vendored engine, solution verification |
-| M5 | CFOP | Dang lam | Cross done -> F2L done -> OLL done (2-look) -> PLL pending |
+| M5 | CFOP | Dang lam | Cross done -> F2L done -> OLL done (1-look 57 cases) -> PLL done (21 cases) |
 | M6 | Roux | â³ ChÆ°a lÃ m | FB â†’ SB â†’ CMLL â†’ LSE |
 | M7 | Optimal | â³ ChÆ°a lÃ m | IDA* + pruning/PDB/symmetry |
 | M8 | Web UI hoÃ n chá»‰nh | â³ ChÆ°a lÃ m | Skeleton cÃ³ sáºµn; cáº§n ná»‘i/render API Ä‘áº§y Ä‘á»§ |
@@ -967,3 +967,27 @@ Full suite: 74 passed in 14.33s
 
 **NEXT ACTION:**
 - M5 PLL: implement 21 PLL cases, recognition, algorithm table and verification.
+
+
+### 2026-09-30 - M5 CFOP: triển khai PLL 21 cases
+
+**Completed:**
+- Added PLLSolver with the complete 21-case PLL algorithm database: Ua/Ub, H, Z, Aa/Ab, E, T, F, Ja/Jb, Ra/Rb, Y, V, Na/Nb and Ga/Gb/Gc/Gd.
+- Added PLL case recognition from last-layer corner/edge permutation plus AUF handling.
+- Extended-notation algorithms are executed through the vendored Kociemba engine only as a move executor.
+- Added pll_solved() and full verification after each PLL algorithm.
+- Added regression coverage for all 21 embedded PLL cases.
+- Replaced Ra and V with rotationless/verified variants after testing the engine's extended notation behavior.
+
+**Test:**
+`	ext
+CFOP tests: 12 passed in 14.04s
+Full suite: 75 passed in 14.61s
+`
+
+**Decision:**
+- PLL is now a complete 21-case one-look phase.
+- cfop remains unregistered until the full CFOPSolver integration is implemented and verified.
+
+**NEXT ACTION:**
+- Implement CFOPSolver: Cross -> F2L -> 1-look OLL -> 1-look PLL, aggregate phase output, verify the full solution, then register cfop and add API coverage.

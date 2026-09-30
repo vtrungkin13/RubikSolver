@@ -594,5 +594,113 @@ class OLLSolver(Solver):
         )
 
 
+# ---------------------------------------------------------------------------
+# PLL
+# ---------------------------------------------------------------------------
+
+_PLL_ALGORITHMS: tuple[tuple[str, str], ...] = (
+    ("Ua", "M2 U' M U2 M' U' M2"),
+    ("Ub", "M2 U M U2 M' U M2"),
+    ("H", "M2 U M2 U2 M2 U M2"),
+    ("Z", "M' U M2 U M2 U M' U2 M2"),
+    ("Aa", "x' R2 D2 R' U' R D2 R' U R' x"),
+    ("Ab", "x' R U' R D2 R' U R D2 R2 x"),
+    ("E", "x' R U' R' D R U R' D' R U R' D R U' R' D' x"),
+    ("T", "R U R' U' R' F R2 U' R' U' R U R' F'"),
+    ("F", "R' U' F' R U R' U' R' F R2 U' R' U' R U R' U R"),
+    ("Ja", "x R2 F R F' R U2 r' U r U2 x'"),
+    ("Jb", "R U R' F' R U R' U' R' F R2 U' R'"),
+    ("Ra", "R U' R' U' R U R D R' U' R D' R' U2 R'"),
+    ("Rb", "R' U2 R U2 R' F R U R' U' R' F' R2"),
+    ("Y", "F R U' R' U' R U R' F' R U R' U' R' F R F'"),
+    ("V", "R' U R' U' R D' R' D R' U D' R2 U' R2 D R2"),
+    ("Na", "R U R' U R U R' F' R U R' U' R' F R2 U' R' U2 R U' R'"),
+    ("Nb", "R' U L' U2 R U' L R' U L' U2 R U' L"),
+    ("Ga", "R2 U R' U R' U' R U' R2 D U' R' U R D'"),
+    ("Gb", "R' U' R U D' R2 U R' U R U' R U' R2 D"),
+    ("Gc", "R2 U' R U' R U R' U R2 U D' R U' R' D"),
+    ("Gd", "R U R' U' D R2 U' R U' R' U R' U R2 D'"),
+)
+
+_PLL_CASE_LOOKUP: dict[tuple[tuple[int, ...], tuple[int, ...]], tuple[str, str]] | None = None
+
+
+def pll_solved(cube: CubeState) -> bool:
+    return oll_solved(cube) and cube.cp == tuple(range(8)) and cube.ep == tuple(range(12))
+
+
+def _pll_key(cube: CubeState) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    return cube.cp[:4], cube.ep[:4]
+
+
+def _build_pll_case_lookup() -> dict[tuple[tuple[int, ...], tuple[int, ...]], tuple[str, str]]:
+    lookup: dict[tuple[tuple[int, ...], tuple[int, ...]], tuple[str, str]] = {}
+    solved = CubeState.solved()
+    for name, algorithm in _PLL_ALGORITHMS:
+        case = _apply_oll_algorithm(solved, _inverse_algorithm(algorithm))
+        if not f2l_solved(case) or not oll_solved(case):
+            raise RuntimeError(f"PLL case {name} does not preserve OLL/F2L")
+        current = case
+        auf_prefixes = ("", "U'", "U2", "U")
+        for rotation in range(4):
+            key = _pll_key(current)
+            candidate = (auf_prefixes[rotation] + (" " if auf_prefixes[rotation] else "") + algorithm).strip()
+            if key in lookup and lookup[key][0] != name:
+                raise RuntimeError(f"PLL case collision: {name} conflicts with {lookup[key][0]}")
+            lookup[key] = (name, candidate)
+            current = apply_move(current, "U")
+    if len(lookup) < 21:
+        raise RuntimeError(f"Expected at least 21 PLL cases, generated {len(lookup)}")
+    return lookup
+
+
+class PLLSolver(Solver):
+    """CFOP PLL solver using the complete 21-case algorithm database."""
+
+    method = "cfop-pll"
+
+    def solve(self, cube: CubeState) -> Solution:
+        if not oll_solved(cube):
+            raise RuntimeError("PLL requires solved CFOP OLL")
+        if pll_solved(cube):
+            return Solution(
+                method=self.method,
+                moves=(),
+                metric="HTM",
+                verified=True,
+                phases=(SolutionPhase(name="PLL", moves=(), description="Last layer is already permuted."),),
+                metadata={"algorithm": "CFOP PLL", "search": "21-case PLL algorithm database", "case": "Solved", "depth": 0},
+            )
+
+        global _PLL_CASE_LOOKUP
+        if _PLL_CASE_LOOKUP is None:
+            _PLL_CASE_LOOKUP = _build_pll_case_lookup()
+
+        case_name, algorithm = _PLL_CASE_LOOKUP[_pll_key(cube)]
+        after = _apply_oll_algorithm(cube, algorithm)
+        moves = tuple(algorithm.split())
+        if not pll_solved(after):
+            raise RuntimeError(f"PLL case {case_name} algorithm failed verification")
+
+        phase = SolutionPhase(
+            name="PLL",
+            moves=moves,
+            description="One-look PLL: recognize the complete last-layer permutation case and execute one algorithm.",
+        )
+        return Solution(
+            method=self.method,
+            moves=moves,
+            metric="HTM",
+            verified=True,
+            phases=(phase,),
+            metadata={
+                "algorithm": "CFOP PLL",
+                "search": "21-case PLL algorithm database",
+                "case": case_name,
+                "depth": len(moves),
+            },
+        )
+
+
 
 \n
