@@ -122,8 +122,15 @@ def test_oll_solves_sune_and_preserves_f2l() -> None:
     assert f2l_solved(after)
 
 
-def test_oll_solves_two_look_edge_and_corner_cases() -> None:
-    from rubik_solver.solvers.cfop import OLLSolver, f2l_solved, oll_solved
+def test_oll_solves_one_look_cases() -> None:
+    from rubik_solver.solvers.cfop import (
+        OLLSolver,
+        _OLL_ALGORITHMS,
+        _apply_oll_algorithm,
+        _inverse_algorithm,
+        f2l_solved,
+        oll_solved,
+    )
 
     cases = (
         "F R U R' U' F'",
@@ -138,7 +145,17 @@ def test_oll_solves_two_look_edge_and_corner_cases() -> None:
     for scramble in cases:
         cube = scrambled(scramble)
         result = solver.solve(cube)
-        after = apply_moves(cube, result.moves)
+        after = _apply_oll_algorithm(cube, " ".join(result.moves))
         assert result.verified is True
+        assert oll_solved(after)
+        assert f2l_solved(after)
+
+    # Every embedded standard OLL algorithm must be recognized and verified.
+    for case_number, algorithm in _OLL_ALGORITHMS:
+        cube = _apply_oll_algorithm(CubeState.solved(), _inverse_algorithm(algorithm))
+        result = solver.solve(cube)
+        after = _apply_oll_algorithm(cube, " ".join(result.moves))
+        assert result.verified is True
+        assert result.metadata["case"] == case_number
         assert oll_solved(after)
         assert f2l_solved(after)

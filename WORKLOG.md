@@ -943,3 +943,27 @@ Full suite: 74 passed in 14.08s
 - KhÃ´ng Ä‘Äƒng kÃ½ cfop vÃ o registry cho Ä‘áº¿n khi PLL hoÃ n thÃ nh.
 - M5 hiá»‡n cÃ³ Cross + F2L + OLL; PLL lÃ  phase tiáº¿p theo.
 
+
+
+### 2026-09-30 - M5 CFOP: 1-look OLL 57 cases
+
+**Completed:**
+- Replaced the previous 2-look OLL phase with a complete 57-case one-look OLL algorithm database.
+- Added OLL case recognition from corner/edge orientation plus AUF handling (U, U', U2).
+- OLL algorithms may use extended Singmaster notation (
+/l/f, M/S, etc.); the vendored Kociemba engine is used only as the extended-notation executor, not as the OLL solver.
+- Every OLL result is verified on the full CubeState: F2L remains solved and the last layer is fully oriented.
+- Added regression coverage for the embedded OLL algorithm set.
+
+**Test:**
+`	ext
+CFOP tests: 11 passed in 13.89s
+Full suite: 74 passed in 14.33s
+`
+
+**Decision:**
+- OLL is now **1-look OLL with 57 cases**, not 2-look OLL.
+- cfop remains unregistered until PLL and the full CFOPSolver are complete.
+
+**NEXT ACTION:**
+- M5 PLL: implement 21 PLL cases, recognition, algorithm table and verification.
