@@ -849,19 +849,19 @@ Git checkpoint: d71dbff Complete M0-M3 foundations
 **NEXT ACTION:**
 - Tiếp tục M3 — Search Foundation theo checklist hiện có.
 
-### 2026-09-30 � M5 CFOP: ho�n thi?n Cross phase
+### 2026-09-30 — M5 CFOP: hoàn thiện Cross phase
 
-**�� l�m:**
-- T?o `src/rubik_solver/solvers/cfop.py` v?i `CrossSolver` cho phase Cross c?a CFOP.
-- Ch?n Cross chu?n theo D-layer: b?n edge `DR, DF, DL, DB` ph?i d�ng v? tr� v� orientation.
-- Implement Cross search b?ng IDA* v?i pruning c�ng m?t li�n ti?p v� resource limits: max depth, max nodes, timeout.
-- Th�m exact pattern database cho abstraction 4 cross edges d? heuristic l� kho?ng c�ch ch�nh x�c c?a Cross, thay cho heuristic y?u d?a tr�n s? edge sai.
-- T?o `tests/test_cfop.py` cho solved cube, single-turn cases, nhi?u scramble, depth limit v� node limit.
-- Chua dang k� `cfop` v�o solver registry v� F2L/OLL/PLL chua ho�n th�nh; tr�nh expose m?t solver CFOP chua gi?i to�n b? cube.
+**Đã làm:**
+- Tạo `src/rubik_solver/solvers/cfop.py` với `CrossSolver` cho phase Cross của CFOP.
+- Chọn Cross chuẩn theo D-layer: bốn edge `DR, DF, DL, DB` phải đúng vị trí và orientation.
+- Implement Cross search bằng IDA* với pruning cùng mặt liên tiếp và resource limits: max depth, max nodes, timeout.
+- Thêm exact pattern database cho abstraction 4 cross edges để heuristic là khoảng cách chính xác của Cross, thay cho heuristic yếu dựa trên số edge sai.
+- Tạo `tests/test_cfop.py` cho solved cube, single-turn cases, nhiều scramble, depth limit và node limit.
+- Chưa đăng ký `cfop` vào solver registry vì F2L/OLL/PLL chưa hoàn thành; tránh expose một solver CFOP chưa giải toàn bộ cube.
 
-**Bug/di?u ch?nh trong qu� tr�nh l�m:**
-- L?n ch?y d?u g?p `AttributeError` do `_CrossSearch` d�ng `slots=True` nhung `nodes/started/path` chua khai b�o field; d� s?a b?ng `dataclasses.field(init=False, ...)`.
-- Heuristic d?u ti�n qu� y?u khi?n m?t scramble timeout sau ~752k nodes; d� thay b?ng exact Cross pattern database. B? test Cross sau t?i uu ch?y pass.
+**Bug/điều chỉnh trong quá trình làm:**
+- Lần chạy đầu gặp `AttributeError` do `_CrossSearch` dùng `slots=True` nhưng `nodes/started/path` chưa khai báo field; đã sửa bằng `dataclasses.field(init=False, ...)`.
+- Heuristic đầu tiên quá yếu khiến một scramble timeout sau ~752k nodes; đã thay bằng exact Cross pattern database. Bộ test Cross sau tối ưu chạy pass.
 
 **Test:**
 ```text
@@ -870,15 +870,30 @@ Full suite: 68 passed in 4.52s
 ```
 
 **Decision:**
-- Cross solver hi?n l� m?t phase solver d?c l?p, tr? `SolutionPhase(name="Cross")` v� verify tr?ng th�i Cross sau khi gi?i.
-- M5 chua ho�n th�nh cho t?i khi c� F2L ? OLL ? PLL v� CFOPSolver gi?i du?c to�n cube.
+- Cross solver hiện là một phase solver độc lập, trả `SolutionPhase(name="Cross")` và verify trạng thái Cross sau khi giải.
+- M5 chưa hoàn thành cho tới khi có F2L → OLL → PLL và CFOPSolver giải được toàn cube.
 
 **Milestone:**
-- M5 CFOP: dang th?c hi?n � **Cross ho�n th�nh**, F2L/OLL/PLL chua l�m.
+- M5 CFOP: đang thực hiện — **Cross hoàn thành**, F2L/OLL/PLL chưa làm.
 
 **NEXT ACTION:**
-1. Thi?t k? F2L solver d?a tr�n t?ng corner-edge pair.
-2. Th�m predicate/verification cho F2L v� test t?ng case.
-3. Sau khi F2L ?n d?nh m?i tri?n khai OLL.
+1. Thiết kế F2L solver dựa trên từng corner-edge pair.
+2. Thêm predicate/verification cho F2L và test từng case.
+3. Sau khi F2L ổn định mới triển khai OLL.
 
-Git: working tree dang c� 2 file m?i chua commit: `src/rubik_solver/solvers/cfop.py`, `tests/test_cfop.py`.
+Git: working tree đang có 2 file mới chưa commit: `src/rubik_solver/solvers/cfop.py`, `tests/test_cfop.py`.
+
+### 2026-09-30 — Chuẩn hóa charset/Unicode tiếng Việt
+
+**Đã làm:**
+- Phát hiện `WORKLOG.md` bị trộn UTF-8 và Windows-1252 do lần ghi trước bằng PowerShell `Add-Content`.
+- Chuyển toàn bộ `WORKLOG.md` về UTF-8 thuần và sửa lại phần M5 bị mojibake.
+- Thêm `.editorconfig` với `charset = utf-8`, LF và final newline.
+- Frontend khai báo `lang="vi"` và ưu tiên font `Segoe UI`, `Noto Sans`, Arial; HTML đã có `meta charset="utf-8"`.
+
+**Verification:**
+- Strict UTF-8 check: OK.
+- Full test suite: `68 passed in 5.10s`.
+
+**NEXT ACTION:**
+- Tiếp tục M5 với F2L.
