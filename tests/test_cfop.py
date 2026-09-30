@@ -180,3 +180,22 @@ def test_pll_solves_all_21_cases() -> None:
         assert result.metadata["case"] == case_name
         assert oll_solved(after)
         assert pll_solved(after)
+
+
+def test_cfop_solves_complete_scramble() -> None:
+    from rubik_solver.solvers.cfop import CFOPSolver, pll_solved
+
+    cube = scrambled("R U R' F2 D")
+    result = CFOPSolver(
+        cross_timeout_seconds=5,
+        f2l_timeout_seconds=10,
+        oll_timeout_seconds=10,
+    ).solve(cube)
+    after = apply_moves(cube, result.moves)
+
+    assert result.verified is True
+    assert pll_solved(after)
+    assert [phase.name for phase in result.phases] == [
+        "Cross", "F2L-1", "F2L-2", "F2L-3", "F2L-4", "OLL", "PLL"
+    ]
+    assert result.metadata["algorithm"] == "CFOP"

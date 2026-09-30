@@ -702,5 +702,57 @@ class PLLSolver(Solver):
         )
 
 
+class CFOPSolver(Solver):
+    """Complete CFOP solver: Cross -> F2L -> one-look OLL -> one-look PLL."""
 
-\n
+    method = "cfop"
+
+    def __init__(
+        self,
+        *,
+        cross_max_depth: int = 8,
+        cross_max_nodes: int | None = 1_000_000,
+        cross_timeout_seconds: float | None = 10.0,
+        f2l_max_depth: int = 14,
+        f2l_max_nodes: int | None = 2_000_000,
+        f2l_timeout_seconds: float | None = 10.0,
+        oll_max_depth: int = 15,
+        oll_max_nodes: int | None = 2_000_000,
+        oll_timeout_seconds: float | None = 15.0,
+    ) -> None:
+        self.cross_solver = CrossSolver(max_depth=cross_max_depth, max_nodes=cross_max_nodes, timeout_seconds=cross_timeout_seconds)
+        self.f2l_solver = F2LSolver(max_depth=f2l_max_depth, max_nodes=f2l_max_nodes, timeout_seconds=f2l_timeout_seconds)
+        self.oll_solver = OLLSolver(max_depth=oll_max_depth, max_nodes=oll_max_nodes, timeout_seconds=oll_timeout_seconds)
+        self.pll_solver = PLLSolver()
+
+    def solve(self, cube: CubeState) -> Solution:
+        state = cube
+        phases: list[SolutionPhase] = []
+        total_moves: list[str] = []
+        phase_results: list[Solution] = []
+
+        for solver in (self.cross_solver, self.f2l_solver, self.oll_solver, self.pll_solver):
+            result = solver.solve(state)
+            state = apply_moves(state, result.moves)
+            phases.extend(result.phases)
+            total_moves.extend(result.moves)
+            phase_results.append(result)
+
+        if not pll_solved(state):
+            raise RuntimeError("CFOP returned an invalid full-cube solution")
+
+        return Solution(
+            method=self.method,
+            moves=tuple(total_moves),
+            metric="HTM",
+            verified=True,
+            phases=tuple(phases),
+            metadata={
+                "algorithm": "CFOP",
+                "phases": [phase.name for phase in phases],
+                "cross": phase_results[0].metadata,
+                "f2l": phase_results[1].metadata,
+                "oll": phase_results[2].metadata,
+                "pll": phase_results[3].metadata,
+            },
+        )

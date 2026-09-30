@@ -991,3 +991,28 @@ Full suite: 75 passed in 14.61s
 
 **NEXT ACTION:**
 - Implement CFOPSolver: Cross -> F2L -> 1-look OLL -> 1-look PLL, aggregate phase output, verify the full solution, then register cfop and add API coverage.
+
+
+### 2026-09-30 - M5 CFOP: completed end-to-end integration
+
+**Completed:**
+- Added CFOPSolver integrating Cross -> F2L-1..4 -> 1-look OLL -> 1-look PLL.
+- Aggregated all phase moves and metadata into one Solution with method cfop.
+- Verified the complete solution against the full CubeState and require pll_solved(final_state) before success.
+- Registered cfop in the solver registry and added FastAPI coverage.
+- Added end-to-end CFOP regression coverage.
+- Kept configurable resource limits for Cross/F2L/OLL in CFOPSolver.
+- Updated README to mark M5 complete.
+
+**Verification:**
+`	ext
+CFOP + API tests: 18 passed in 14.08s
+Full suite: 77 passed in 14.25s
+`
+
+**M5 acceptance:** Cross, F2L, 1-look OLL (57 cases), 1-look PLL (21 cases), CFOPSolver integration, cfop registry/API, and full-solution verification are complete.
+
+**Git checkpoint:** pending final commit.
+
+**NEXT ACTION:**
+- M6 Roux.
