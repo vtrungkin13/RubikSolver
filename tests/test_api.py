@@ -67,7 +67,7 @@ def test_solve_endpoint_supports_cfop() -> None:
     assert payload["method"] == "cfop"
     assert payload["verified"] is True
     assert [phase["name"] for phase in payload["phases"]] == [
-        "Cross", "F2L-1", "F2L-2", "F2L-3", "F2L-4", "OLL", "PLL"
+        "Orientation", "Cross", "F2L-1", "F2L-2", "F2L-3", "F2L-4", "OLL", "PLL"
     ]
 
 

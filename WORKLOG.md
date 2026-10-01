@@ -1,4 +1,4 @@
-﻿# RubikSolver â€” Session Handoff / Development Trace
+# RubikSolver â€” Session Handoff / Development Trace
 
 > **Má»¥c Ä‘Ã­ch:** ÄÃ¢y lÃ  file truy váº¿t chÃ­nh Ä‘á»ƒ tiáº¿p tá»¥c project giá»¯a cÃ¡c phiÃªn ChatGPT/PalmBridge.
 > Má»—i phiÃªn má»›i nÃªn **Ä‘á»c file nÃ y trÆ°á»›c**, sau Ä‘Ã³ kiá»ƒm tra nhanh Git status + test náº¿u cáº§n. KhÃ´ng cáº§n dá»±a vÃ o trÃ­ nhá»› cá»§a phiÃªn trÆ°á»›c.
@@ -995,6 +995,10 @@ Full suite: 75 passed in 14.61s
 
 ### 2026-09-30 - M5 CFOP: completed end-to-end integration
 
+**Follow-up adjustment:**
+- Increased the default `CFOPSolver` F2L timeout from 10 seconds to 60 seconds at the user's request, without changing F2L search logic.
+- Increased the default `CFOPSolver` F2L node limit from 2,000,000 to 10,000,000 after the supplied scramble hit the previous node limit.
+
 **Completed:**
 - Added CFOPSolver integrating Cross -> F2L-1..4 -> 1-look OLL -> 1-look PLL.
 - Aggregated all phase moves and metadata into one Solution with method cfop.
@@ -1045,3 +1049,131 @@ Full suite: 77 passed in 14.25s
 
 **NEXT ACTION:**
 - Continue with M6 Roux unless another cube-notation feature is requested.
+
+
+### 2026-10-01 - F2L human-style search refinement
+
+**Đã làm:**
+- Điều chỉnh _F2LSearch để IDA* ưu tiên move ordering giống cách cuber xử lý F2L: ưu tiên U/setup và các mặt của slot hiện tại, hạn chế D và các mặt ngoài slot khi thứ tự duyệt nghiệm.
+- Giữ nguyên objective correctness + minimum HTM depth của IDA*; thay đổi chỉ ảnh hưởng nghiệm được chọn trong cùng tầng tìm kiếm.
+- Thêm regression test xác nhận F2L dùng human-style move ordering.
+- Bổ sung xử lý PLL cho trường hợp Last Layer đã solved nhưng còn AUF U/U2/U\' do F2L/OLL kết thúc ở hướng U khác.
+
+**Kết quả mẫu:**
+- F2L-1: R U\' R\'
+- F2L-3: U B\' U\' R B\' R\' B2
+- F2L-4: B U2 L U2 L\' B\'
+
+**Bug/decision:**
+- Lần đầu thử thu 24 nghiệm cùng độ sâu làm thời gian F2L tăng mạnh; đã loại bỏ candidate enumeration và giữ human-style ordering trực tiếp trong DFS.
+- Regression extended-notation ban đầu gặp PLL KeyError với trạng thái chỉ còn U2 AUF; đã sửa tại PLL thay vì làm F2L phụ thuộc vào orientation cụ thể.
+
+**Test:**
+- CFOP tests: 15 passed in 14.03s
+- Full suite: 94 passed in 16.61s
+
+**NEXT ACTION:**
+- M6 Roux, trừ khi tiếp tục tinh chỉnh human-style F2L/case recognition.
+
+
+### 2026-10-01 - PLL KeyError fallback fix
+
+**Bug:**
+- FastAPI CFOP request could fail with KeyError: ((1, 3, 2, 0), (0, 3, 1, 2)) in the 21-case PLL lookup.
+- Root cause: the reduced (cp[:4], ep[:4]) lookup does not cover every legal last-layer permutation orientation produced by the preceding phases.
+
+**Fix:**
+- Added a verified Kociemba fallback when a legal PLL key is not present in the embedded 21-case lookup.
+- The normal 21-case PLL path remains unchanged; fallback is only used for unmapped valid permutations.
+- Added regression coverage for the exact class of legal unmapped permutation.
+
+**Verification:**
+- CFOP tests: 16 passed in 13.81s
+- Full suite: 95 passed in 15.28s
+
+**NEXT ACTION:**
+- Continue human-style F2L case recognition refinement or M6 Roux.
+
+
+### 2026-10-01 - PLL 21-case AUF + cube-orientation recognition fix
+
+**Bug clarification:**
+- The previous Kociemba fallback was only masking the real recognition problem.
+- The failing key `((1, 3, 2, 0), (0, 3, 1, 2))` is a valid standard PLL state: it is the `Gc` case viewed after a `y` cube rotation, with an AUF before execution. It is not a 22nd PLL case.
+
+**Fix:**
+- Removed the Kociemba PLL fallback completely.
+- PLL recognition now expands each of the same 21 algorithms across all 4 AUF prefixes and all 4 `y` orientations.
+- Duplicate recognition aliases are accepted as aliases of the same 21-case database rather than treated as new PLL cases.
+- Lookup now generates 284 legal permutation keys; the remaining 4 are the solved permutation under AUF and are handled by the existing solved/AUF path.
+
+**Verification:**
+- Exact former-KeyError regression now recognizes case `Gc` and solves with the normal `21-case PLL algorithm database` path.
+- CFOP tests: 16 passed in 14.74s
+- Full suite: 95 passed in 16.82s
+
+**NEXT ACTION:**
+- Continue human-style F2L case recognition refinement or move to M6 Roux.
+
+
+### 2026-10-01 - White Cross orientation investigation
+
+**Investigation:**
+- Tested the proposed `x2` normalization for making the standard white-on-U Cross use the existing D-Cross search.
+- `x2` alone is not sufficient because the cubie model keeps piece identities tied to the fixed color frame; applying the existing F2L/PLL pipeline after a raw x2 changes the target piece mapping.
+- Experimental white-frame changes were removed to keep the working CFOP pipeline stable. No white-Cross behavior change is currently exposed.
+
+**Verification:**
+- CFOP tests: 16 passed in 14.62s.
+
+**NEXT ACTION:**
+- Implement a proper whole-CFOP coordinate transform (including Cross/F2L/PLL recognition and move-frame conversion) before switching the default Cross from yellow to white.
+
+
+### 2026-10-01 - White Cross CFOP implementation completed
+
+**Requirement:**
+- Standard scramble orientation is white on U and green on F; CFOP Cross must be the white Cross instead of the previous yellow/D Cross.
+
+**Implementation:**
+- CFOPSolver now searches Cross directly on the original U-layer white edge pieces `(0, 1, 2, 3)` in positions `(0, 1, 2, 3)`.
+- After Cross, the returned solution contains an explicit `x2` Orientation phase, moving the completed white Cross to D for the existing F2L → OLL → PLL pipeline.
+- Added `_to_x2_coordinate_frame()` to relabel cubies after the physical `x2` so the existing F2L/OLL/PLL canonical piece tables remain valid without pretending CubeState stores centers.
+- Added `_cfop_solved()` so final verification accepts the solved cube in the x2-rotated coordinate representation produced by the explicit whole-cube rotation.
+- Cross PDB is now cached per target position, so the white U Cross has an exact heuristic instead of reusing the D Cross goal table.
+- Raised CFOP Cross defaults to depth 10 / 2,000,000 nodes / 15 seconds because white Cross cases are not bounded by the old D-Cross search budget.
+- API/test expectations now include the explicit `Orientation` phase.
+
+**Regression coverage:**
+- Added a test that applies only the Cross phase and verifies the four original U/white Cross edges are solved before the `x2` phase.
+- CFOP tests: `17 passed in 26.63s`.
+- Full project suite: `96 passed in 33.59s`.
+
+**NEXT ACTION:**
+- Continue human-style F2L case recognition refinement or move to M6 Roux.
+
+
+### 2026-10-01 - White Cross pre-orientation refined
+
+**Requirement change:**
+- Do not solve white Cross on U and rotate afterward.
+- Orient the cube first so white Cross is on D, then keep it on D through F2L.
+- Allow `y`, `y'`, or `y2` before Cross when that makes the Cross execution more finger-trick-friendly.
+
+**Implementation:**
+- CFOPSolver now enters the established canonical D-Cross frame with `x2` before Cross.
+- The solver evaluates the four possible front-face choices by conjugating the same D-Cross solution with `y`, `y'`, `y2`, rather than performing four independent expensive Cross searches.
+- Orientation is emitted as the first phase, e.g. `x2`, `x2 y'`, `x2 y' y'`, or `x2 y' y' y'`.
+- Cross is emitted immediately after Orientation and remains the D-layer Cross; there is no post-Cross Orientation phase.
+- Added orientation-aware move conjugation for Cross/F2L/OLL/PLL so all phase algorithms execute correctly after the selected y rotation.
+- Orientation scoring prefers shortest Cross first, then fewer B/L/D turns, fewer double turns, and lower y-rotation cost.
+- Sampled scrambles selected both plain `x2` and a y-rotated orientation, confirming the orientation selector is active.
+
+**Regression coverage:**
+- Updated CFOP/API phase-order expectations.
+- Added explicit regression coverage that Orientation precedes Cross and that the Cross maps back to the canonical D Cross after undoing the selected y conjugation.
+- CFOP + API tests: `24 passed in 22.76s`.
+- Full project suite: `96 passed in 22.57s`.
+
+**NEXT ACTION:**
+- Validate more real-world scrambles for Cross finger-trick scoring; then continue human-style F2L case recognition.

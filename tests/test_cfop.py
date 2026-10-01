@@ -100,6 +100,18 @@ def test_f2l_preserves_cross_and_previous_pairs() -> None:
             assert f2l_slot_solved(state, corner, edge)
 
 
+def test_f2l_uses_human_style_move_ordering() -> None:
+    from rubik_solver.solvers.cfop import CrossSolver, F2LSolver
+
+    cube = scrambled("R U R' F2 D L2 B U2")
+    cross = CrossSolver(max_depth=8, timeout_seconds=5).solve(cube)
+    after_cross = apply_moves(cube, cross.moves)
+    result = F2LSolver(max_depth=14, timeout_seconds=10).solve(after_cross)
+
+    assert result.metadata["search"] == "IDA* with exact corner-edge pair PDB and human-style move ordering"
+    assert all(phase.name.startswith("F2L-") for phase in result.phases)
+
+
 def test_oll_solves_already_oriented_f2l() -> None:
     from rubik_solver.solvers.cfop import OLLSolver, oll_solved
 
@@ -182,8 +194,28 @@ def test_pll_solves_all_21_cases() -> None:
         assert pll_solved(after)
 
 
+def test_pll_recognizes_auf_and_y_rotated_case() -> None:
+    from rubik_solver.solvers.cfop import PLLSolver, _apply_oll_algorithm, pll_solved
+
+    # This is the exact legal PLL state that previously raised KeyError.
+    # It is Gc viewed one y-rotation away, with an AUF before execution.
+    cube = CubeState(
+        cp=(1, 3, 2, 0, 4, 5, 6, 7),
+        co=(0, 0, 0, 0, 0, 0, 0, 0),
+        ep=(0, 3, 1, 2, 4, 5, 6, 7, 8, 9, 10, 11),
+        eo=(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+    )
+    result = PLLSolver().solve(cube)
+    after = _apply_oll_algorithm(cube, " ".join(result.moves))
+
+    assert result.verified is True
+    assert result.metadata["case"] == "Gc"
+    assert result.metadata["search"] == "21-case PLL algorithm database"
+    assert pll_solved(after)
+
+
 def test_cfop_solves_complete_scramble() -> None:
-    from rubik_solver.solvers.cfop import CFOPSolver, pll_solved
+    from rubik_solver.solvers.cfop import CFOPSolver, _apply_oll_algorithm, _cfop_solved
 
     cube = scrambled("R U R' F2 D")
     result = CFOPSolver(
@@ -191,18 +223,46 @@ def test_cfop_solves_complete_scramble() -> None:
         f2l_timeout_seconds=10,
         oll_timeout_seconds=10,
     ).solve(cube)
-    after = apply_moves(cube, result.moves)
+    after = _apply_oll_algorithm(cube, " ".join(result.moves))
 
     assert result.verified is True
-    assert pll_solved(after)
+    assert _cfop_solved(after)
     assert [phase.name for phase in result.phases] == [
-        "Cross", "F2L-1", "F2L-2", "F2L-3", "F2L-4", "OLL", "PLL"
+        "Orientation", "Cross", "F2L-1", "F2L-2", "F2L-3", "F2L-4", "OLL", "PLL"
     ]
     assert result.metadata["algorithm"] == "CFOP"
 
 
+def test_cfop_orients_before_white_cross_on_d() -> None:
+    from rubik_solver.solvers.cfop import (
+        CFOPSolver,
+        _conjugate_moves,
+        _cross_goal,
+        _to_x2_coordinate_frame,
+    )
+
+    cube = scrambled("R U R' F2 D")
+    result = CFOPSolver(
+        cross_timeout_seconds=10,
+        f2l_timeout_seconds=10,
+        oll_timeout_seconds=10,
+    ).solve(cube)
+    orientation = result.phases[0]
+    cross = result.phases[1]
+    assert orientation.name == "Orientation"
+    assert orientation.moves[0] == "x2"
+    assert all(move in {"y", "y'", "y2"} for move in orientation.moves[1:])
+    assert cross.name == "Cross"
+
+    y_count = sum(move in {"y", "y'"} for move in orientation.moves[1:])
+    inverse_y = " ".join("y'" for _ in range(y_count))
+    canonical_cross = _conjugate_moves(inverse_y, cross.moves) if inverse_y else cross.moves
+    after_cross = apply_moves(_to_x2_coordinate_frame(cube), canonical_cross)
+    assert _cross_goal(after_cross, (4, 5, 6, 7), (4, 5, 6, 7))
+
+
 def test_cfop_solves_extended_notation_regression_scramble() -> None:
-    from rubik_solver.solvers.cfop import CFOPSolver, _apply_oll_algorithm, pll_solved
+    from rubik_solver.solvers.cfop import CFOPSolver, _apply_oll_algorithm, _cfop_solved
 
     scramble = "R B2 L2 D L2 D2 B2 L2 D R2 U' B2 L2 F' D' R U R U2 F' R2"
     cube = scrambled(scramble)
@@ -210,4 +270,4 @@ def test_cfop_solves_extended_notation_regression_scramble() -> None:
     after = _apply_oll_algorithm(cube, " ".join(result.moves))
 
     assert result.verified is True
-    assert pll_solved(after)
+    assert _cfop_solved(after)
