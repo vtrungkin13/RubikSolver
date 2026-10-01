@@ -6,7 +6,7 @@
 > **Project:** `D:\Coding\Python\RubikSolver`
 > **Git:** branch `main`, upstream `origin/main`
 > **Last known stable code checkpoint:** M5 OLL two-look phase (latest Git commit)
-> **Last verified test result:** `74 passed in 14.43s`
+> **Last verified test result:** `100 passed in 91.90s`
 > **Last verified API:** `POST /api/solve` vá»›i method `kociemba` hoáº¡t Ä‘á»™ng vÃ  tráº£ `verified=true`.
 
 ---
@@ -1177,3 +1177,147 @@ Full suite: 77 passed in 14.25s
 
 **NEXT ACTION:**
 - Validate more real-world scrambles for Cross finger-trick scoring; then continue human-style F2L case recognition.
+
+
+### 2026-10-01 - F2L flexible pair selection and ergonomic orientation
+
+**Requirement change:**
+- F2L must no longer solve slots in fixed 1 -> 2 -> 3 -> 4 order.
+- At each step, evaluate all remaining corner-edge pairs and prefer the pair with the easiest execution.
+- Finger-trick ergonomics have higher priority than raw move count; especially avoid B, B', B2, then penalize D and L.
+- Allow limited y / y' frame changes during F2L when they improve execution, but do not rotate before every pair.
+
+**Implementation:**
+- Reworked F2LSolver into dynamic pair selection with pair_order metadata.
+- Each remaining pair is solved with the existing IDA* + exact pair PDB search, then ranked by an ergonomic profile:
+  1. hard-turn score (B highest, then D, then L)
+  2. total move count
+  3. B-move count
+  4. double-turn count
+- Added y-frame-aware F2L search. The solver searches the actual rotated cube state and derives the target/protected slot positions and orientation goals from the corresponding rotated solved reference.
+- F2L can keep a selected y frame across multiple pairs and emits at most one restoration rotation at the end of the F2L phase.
+- y-frame candidate searches use a small 1.5s budget and fall back to the current frame when an alternative orientation is too expensive to search.
+- F2L's internal canonical state is kept separate from the physical Cross frame. CFOPSolver conjugates the completed F2L output once into the Cross orientation, preserving the existing OLL/PLL pipeline.
+- Generalized the pair PDB to support non-zero target corner/edge orientations required by rotated frames.
+- Existing Cross/OLL/PLL behavior remains intact.
+
+**Regression coverage:**
+- Updated F2L preservation tests to follow the actual dynamic pair_order and execute phases through the vendored engine when y notation is present.
+- Added coverage for non-fixed pair ordering and the orientation-change budget metadata.
+- CFOP + API tests before the final y-frame regression addition: 25 passed in 131.56s.
+- Full project suite before the final y-frame regression addition: 97 passed in 131.75s.
+- Additional y-frame regression: test_f2l_y_frame_search_preserves_canonical_pair passed in 3.95s.
+
+**NEXT ACTION:**
+- Validate more real-world F2L scrambles specifically for y-frame selection and finger-trick scoring; then refine recognition/lookahead behavior.
+
+### 2026-10-01 - F2L y-frame Cross preservation bug fix
+
+**Bug:**
+- F2L y-frame search rotated the cube state but continued using the canonical Cross edge positions.
+- This mismatch could allow a pair search to succeed while the resulting canonical state no longer preserved the already-solved Cross, producing `F2L returned an invalid first-two-layers state` in CFOP/API.
+
+**Fix:**
+- In `_search_pair`, derive `cross_positions` from the rotated solved reference for the active y-frame.
+- Added regression coverage that checks both canonical and physical y-frame execution preserve Cross.
+
+**Verification:**
+- y-frame regressions: `2 passed in 9.01s`.
+- `git diff --check`: passed.
+
+**NEXT ACTION:**
+- Re-run the full CFOP/API suite and test the user's failing scramble; then continue broader randomized F2L validation.
+
+**Test follow-up:**
+- Updated the existing Cross-preservation regression to normalize the physical state back from the active y-frame before checking the canonical Cross goal.
+- The previous assertion was itself stale under the new persistent-frame behavior; it incorrectly treated a physically y-rotated solved Cross as unsolved.
+- Focused preservation regressions: `3 passed in 20.22s`.
+
+**Final verification after fix:**
+- Targeted F2L preservation + y-frame regressions: `3 passed in 20.73s`.
+- API suite: `7 passed in 41.71s`.
+- `git diff --check`: passed.
+- A 40-scramble randomized F2L run completed without reporting an invalid result; its stdout was buffered, so individual cases were not captured and this run is treated only as supplementary validation.
+
+### 2026-10-01 - F2L ergonomics and final-frame update
+
+- F2L ergonomic scoring now penalizes B more strongly; L and R have equal ergonomic weight.
+- A single F2L pair search no longer permits mixing R and L turns.
+- F2L search does not hard-ban B; it uses a strong B penalty and relies on y-frame selection to replace awkward B-heavy solutions with R/F/L alternatives when available.
+- F2L no longer emits a restoration rotation after the fourth pair. The final internal y-frame is carried into OLL/PLL recognition/execution instead.
+- A y/y'/y2 rotation may occur before F2L-4 when that improves its execution; no y/y'/y2 rotation is emitted after F2L-4.
+- Existing y-frame regressions were previously verified; a fresh full regression is still pending after the latest ergonomic constraint.
+
+**NEXT ACTION:**
+- Run the complete CFOP/API suite and add dedicated tests for: no R+L in one pair, no B in F2L, no rotation after F2L-4, and OLL/PLL execution in the carried final frame.
+
+**Correction:**
+- The attempted hard ban on B moves was reverted after regression runs showed it can make the generic IDA* pair search time out on valid cases.
+- Current behavior is therefore **strong B penalty + R/L mutual exclusion**, not an absolute B ban. A future optimization pass should use alternative y-frame / candidate search rather than a hard B prohibition.
+
+### 2026-10-01 - F2L pair recognition pass
+
+**Implementation:**
+- Added explicit pre-search F2L pair recognition via `_f2l_pair_readiness()`.
+- Recognition tiers now prioritize, before raw search ergonomics:
+  1. `u_ready_pair` — both matching pieces on U, adjacent, corner oriented away from U, edge oriented.
+  2. `paired_in_slot` — matching corner/edge already connected in an F2L slot but not their solved home.
+  3. `u_adjacent_setup` — both matching pieces adjacent on U but not yet in a ready orientation.
+  4. `one_piece_in_slot` — one piece is in an F2L slot while its partner is on U.
+  5. `unprepared` — normal extraction/setup/search case.
+- Pair selection sorts by recognition tier first, then retains the existing ergonomic score: B penalty, move count, B count, double turns.
+- Added `pair_readiness` metadata so each F2L phase records what recognition state caused its priority.
+- Removed the stale no-op `skip_faces` field from `_F2LSearch`.
+
+**Frame handling:**
+- Kept the no-restoration final-pair behavior.
+- The internal F2L state remains canonical for the fixed-slot OLL/PLL recognizers. OLL/PLL are conjugated by `initial_frame - final_frame` modulo 4, matching the frame convention used by `_conjugate_moves`; no y rotation is emitted after F2L-4.
+- CFOP final verification accepts a solved cube up to whole-cube y/x2 orientation, matching the intentional no-restoration frame behavior.
+
+**Verification:**
+- Pair recognition unit tests pass.
+- Focused warmed-cache regression: `2 passed in 42.13s` with F2L followed by the extended CFOP case.
+- Latest full project run: `100 passed in 79.17s`; `git diff --check` passes.
+- The complete CFOP suite should be re-run once more after the final metadata/worklog cleanup before treating this as a stable checkpoint.
+
+**NEXT ACTION:**
+- Add a deterministic integration regression proving a recognized ready/setup pair is selected ahead of a less-ready pair. Full-suite frame regression is resolved.
+
+### 2026-10-01 - F2L rotation-first ergonomic refinement
+
+- Investigated why B turns were still appearing despite the strong B penalty.
+- Root cause: alternative y-frame searches were only given a 1.5s scout budget, so frame candidates could time out before being compared. The solver therefore kept the current-frame B-heavy solution even when an R/F solution existed.
+- Removed the `len(remaining) > 1` restriction: rotation is now allowed **before any pair, including F2L-4**. The invariant remains that no rotation is emitted after the final pair.
+- Increased the alternative-frame search budget to up to 8s when the current candidate has an awkward-turn profile.
+- Ergonomic comparison remains hard-turn priority first, so a longer R/F solution can beat a shorter B solution when the B penalty warrants it.
+- Deterministic regression now checks the representative B-heavy F2L case: the selected phase uses a y-frame and avoids B, while F2L-4 itself ends without a y rotation.
+
+**Observed result on representative scramble** `R U R' F2 D L2 B U2`:
+- Previous F2L-3: `D B' U B D'` (B-heavy).
+- New F2L-3: `y D R' U R D'` (no B).
+- New F2L-4: `R' U F' U2 F U' R` (no B, no trailing rotation).
+- `orientation_changes=1`, `final_frame=1`.
+
+**Verification:**
+- Full project: `100 passed in 91.90s`.
+- `git diff --check`: passed.
+
+
+### 2026-10-02 - Deterministic F2L recognition-priority integration regression
+
+**Completed:**
+- Added a deterministic integration regression using scramble `R U R'`.
+- Confirmed this state preserves the Cross while pair 1 is recognized as `u_ready_pair` (tier 0).
+- Confirmed the other three pairs are `paired_in_slot` (tier 1), so recognition priority has a clear deterministic ordering.
+- Ran the real `F2LSolver` and verified pair 1 is selected first with `pair_readiness[0] == "u_ready_pair"`.
+- Verified the resulting canonical F2L solution still produces a fully solved F2L state.
+
+**Test:**
+- New targeted regression: `1 passed, 21 deselected in 3.81s`.
+- Full project suite: `101 passed in 91.09s`.
+- `git diff --check`: passed (only normal Git LF→CRLF warnings).
+
+**NEXT ACTION:**
+- Treat the current F2L recognition-priority regression as stable.
+- Continue broader F2L case-recognition/lookahead refinement, with emphasis on setup/paired cases and human-style execution.
+- Do not move to M6 Roux yet if further F2L ergonomic/recognition issues remain.

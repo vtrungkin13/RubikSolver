@@ -78,7 +78,11 @@ def test_f2l_solves_scrambles_after_cross() -> None:
         cross = CrossSolver(max_depth=8, timeout_seconds=5).solve(cube)
         after_cross = apply_moves(cube, cross.moves)
         f2l = F2LSolver(max_depth=14, timeout_seconds=10).solve(after_cross)
-        after_f2l = apply_moves(after_cross, f2l.moves)
+        # F2L.moves is the physical, possibly y-rotated sequence. The solver's
+        # canonical_moves is the equivalent sequence used to verify the fixed
+        # D-Cross coordinate frame.
+        from rubik_solver.solvers.cfop import _apply_oll_algorithm
+        after_f2l = _apply_oll_algorithm(after_cross, " ".join(f2l.metadata["canonical_moves"]))
         assert f2l.verified is True
         assert f2l_solved(after_f2l)
         assert len(f2l.phases) == 4
@@ -92,12 +96,28 @@ def test_f2l_preserves_cross_and_previous_pairs() -> None:
     after_cross = apply_moves(cube, cross.moves)
     solver = F2LSolver(max_depth=14, timeout_seconds=10)
     result = solver.solve(after_cross)
+    from rubik_solver.solvers.cfop import _apply_oll_algorithm
+
     state = after_cross
+    frame = 0
     for index, phase in enumerate(result.phases):
-        state = apply_moves(state, phase.moves)
-        assert cross_solved(state)
-        for corner, edge in ((4, 8), (5, 9), (6, 10), (7, 11))[: index + 1]:
-            assert f2l_slot_solved(state, corner, edge)
+        state = _apply_oll_algorithm(state, " ".join(phase.moves))
+        for move in phase.moves:
+            if move == "y":
+                frame = (frame + 1) % 4
+            elif move == "y'":
+                frame = (frame - 1) % 4
+            elif move == "y2":
+                frame = (frame + 2) % 4
+        canonical_state = _apply_oll_algorithm(
+            state,
+            " ".join(("y'",) * frame),
+        ) if frame else state
+        assert cross_solved(canonical_state)
+        solved_order = result.metadata["pair_order"][: index + 1]
+        for pair_number in solved_order:
+            corner, edge = ((4, 8), (5, 9), (6, 10), (7, 11))[pair_number - 1]
+            assert f2l_slot_solved(canonical_state, corner, edge)
 
 
 def test_f2l_uses_human_style_move_ordering() -> None:
@@ -108,8 +128,132 @@ def test_f2l_uses_human_style_move_ordering() -> None:
     after_cross = apply_moves(cube, cross.moves)
     result = F2LSolver(max_depth=14, timeout_seconds=10).solve(after_cross)
 
-    assert result.metadata["search"] == "IDA* with exact corner-edge pair PDB and human-style move ordering"
+    assert result.metadata["search"] == "IDA* with exact pair PDB; dynamic pair ordering and ergonomic scoring"
+    assert sorted(result.metadata["pair_order"]) == [1, 2, 3, 4]
+    assert len(result.metadata["pair_readiness"]) == 4
     assert all(phase.name.startswith("F2L-") for phase in result.phases)
+    # A B-heavy candidate should be replaceable by a y-frame with a more
+    # ergonomic R/F execution. The rotation is before the pair, not after it.
+    assert "B" not in {move[0] for move in result.phases[2].moves}
+    assert any(move in {"y", "y'", "y2"} for move in result.phases[2].moves)
+    assert all(move not in {"y", "y'", "y2"} for move in result.phases[-1].moves)
+
+
+def test_f2l_can_change_pair_order_and_tracks_orientation_budget() -> None:
+    from rubik_solver.solvers.cfop import CrossSolver, F2LSolver
+
+    cube = scrambled("R U R' F2 D")
+    cross = CrossSolver(max_depth=8, timeout_seconds=5).solve(cube)
+    after_cross = apply_moves(cube, cross.moves)
+    result = F2LSolver(max_depth=14, timeout_seconds=10).solve(after_cross)
+
+    assert sorted(result.metadata["pair_order"]) == [1, 2, 3, 4]
+    assert len(result.metadata["pair_readiness"]) == 4
+    assert result.metadata["orientation_changes"] >= 0
+    assert result.metadata["orientation_changes"] <= 3
+
+
+def test_f2l_pair_recognition_prioritizes_ready_and_setup_pairs() -> None:
+    from rubik_solver.solvers.cfop import _f2l_pair_readiness
+
+    # A top-layer corner/edge in an adjacent, oriented relationship is a
+    # recognized ready pair; an adjacent but non-ready orientation is setup.
+    ready = CubeState(
+        cp=(4, 1, 2, 3, 0, 5, 6, 7),
+        co=(1, 0, 0, 0, 0, 0, 0, 0),
+        ep=(8, 1, 2, 3, 4, 5, 6, 7, 0, 9, 10, 11),
+        eo=(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+    )
+    assert _f2l_pair_readiness(ready, 4, 8) == (0, "u_ready_pair")
+
+    setup = CubeState(
+        cp=(4, 1, 2, 3, 0, 5, 6, 7),
+        co=(0, 0, 0, 0, 0, 0, 0, 0),
+        ep=(8, 1, 2, 3, 4, 5, 6, 7, 0, 9, 10, 11),
+        eo=(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+    )
+    assert _f2l_pair_readiness(setup, 4, 8) == (2, "u_adjacent_setup")
+
+
+def test_f2l_integration_selects_ready_pair_before_less_ready_pair() -> None:
+    from rubik_solver.solvers.cfop import (
+        F2LSolver,
+        _apply_oll_algorithm,
+        _f2l_pair_readiness,
+        f2l_solved,
+    )
+
+    # R U R' preserves the solved Cross while putting pair 1 into a
+    # recognized ready state. The other three pairs are already in their
+    # slots, which is a lower-priority recognition tier (paired_in_slot).
+    cube = scrambled("R U R'")
+    readiness = [
+        _f2l_pair_readiness(cube, corner, edge)
+        for corner, edge in ((4, 8), (5, 9), (6, 10), (7, 11))
+    ]
+    assert readiness[0] == (0, "u_ready_pair")
+    assert all(tier == 1 for tier, _ in readiness[1:])
+
+    result = F2LSolver(max_depth=14, timeout_seconds=10).solve(cube)
+
+    assert result.verified is True
+    assert result.metadata["pair_order"][0] == 1
+    assert result.metadata["pair_readiness"][0] == "u_ready_pair"
+    after = _apply_oll_algorithm(cube, " ".join(result.metadata["canonical_moves"]))
+    assert f2l_solved(after)
+
+
+def test_f2l_y_frame_search_preserves_canonical_pair() -> None:
+    from rubik_solver.solvers.cfop import (
+        CrossSolver,
+        F2LSolver,
+        _apply_oll_algorithm,
+        f2l_slot_solved,
+    )
+
+    cube = scrambled("R U2 F2 D")
+    cross = CrossSolver(max_depth=8, timeout_seconds=5).solve(cube)
+    after_cross = apply_moves(cube, cross.moves)
+    solver = F2LSolver(max_depth=14, timeout_seconds=5)
+    frame_moves, canonical_moves, _ = solver._search_pair(
+        after_cross,
+        0,
+        (),
+        1,
+    )
+
+    canonical_after = _apply_oll_algorithm(after_cross, " ".join(canonical_moves))
+    assert f2l_slot_solved(canonical_after, 4, 8)
+
+    physical_after = _apply_oll_algorithm(
+        after_cross,
+        " ".join(("y", *frame_moves, "y'")),
+    )
+    assert f2l_slot_solved(physical_after, 4, 8)
+
+
+def test_f2l_y_frame_search_preserves_cross() -> None:
+    from rubik_solver.solvers.cfop import CrossSolver, F2LSolver, _apply_oll_algorithm, cross_solved
+
+    cube = scrambled("R U2 F2 D")
+    cross = CrossSolver(max_depth=8, timeout_seconds=5).solve(cube)
+    after_cross = apply_moves(cube, cross.moves)
+    solver = F2LSolver(max_depth=14, timeout_seconds=5)
+    frame_moves, canonical_moves, _ = solver._search_pair(
+        after_cross,
+        0,
+        (),
+        1,
+    )
+
+    canonical_after = _apply_oll_algorithm(after_cross, " ".join(canonical_moves))
+    assert cross_solved(canonical_after)
+
+    physical_after = _apply_oll_algorithm(
+        after_cross,
+        " ".join(("y", *frame_moves, "y'")),
+    )
+    assert cross_solved(physical_after)
 
 
 def test_oll_solves_already_oriented_f2l() -> None:

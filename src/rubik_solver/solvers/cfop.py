@@ -294,7 +294,7 @@ class CrossSolver(Solver):
 
 _F2L_SLOTS = ((4, 8), (5, 9), (6, 10), (7, 11))
 _F2L_SLOT_FACES = (("U", "R", "F"), ("U", "F", "L"), ("U", "L", "B"), ("U", "B", "R"))  # DFR/FR, DLF/FL, DBL/BL, DRB/BR_F2L_SLOT_FACES = (("U", "R", "F"), ("U", "F", "L"), ("U", "L", "B"), ("U", "B", "R"))
-_F2L_PAIR_PDBS: dict[tuple[int, int, int, int], dict[tuple[int, int, int, int], int]] = {}
+_F2L_PAIR_PDBS: dict[tuple[int, int, int, int, int, int], dict[tuple[int, int, int, int], int]] = {}
 _F2L_PAIR_TRANSITIONS: dict[str, tuple[tuple[int, int], ...]] | None = None
 
 
@@ -354,12 +354,19 @@ def _build_f2l_pair_pdb(
     edge_piece: int,
     corner_goal: int,
     edge_goal: int,
+    corner_orientation_goal: int = 0,
+    edge_orientation_goal: int = 0,
 ) -> dict[tuple[int, int, int, int], int]:
     global _F2L_PAIR_TRANSITIONS
     if _F2L_PAIR_TRANSITIONS is None:
         _F2L_PAIR_TRANSITIONS = _build_f2l_pair_transitions()
 
-    solved = (corner_goal, 0, edge_goal, 0)
+    solved = (
+        corner_goal,
+        corner_orientation_goal,
+        edge_goal,
+        edge_orientation_goal,
+    )
     distances = {solved: 0}
     queue = deque([solved])
     while queue:
@@ -388,25 +395,45 @@ def _f2l_pair_heuristic(
     edge_piece: int,
     corner_goal: int,
     edge_goal: int,
+    corner_orientation_goal: int = 0,
+    edge_orientation_goal: int = 0,
 ) -> int:
-    key = (corner_piece, edge_piece, corner_goal, edge_goal)
+    key = (
+        corner_piece,
+        edge_piece,
+        corner_goal,
+        edge_goal,
+        corner_orientation_goal,
+        edge_orientation_goal,
+    )
     pdb = _F2L_PAIR_PDBS.get(key)
     if pdb is None:
-        pdb = _build_f2l_pair_pdb(corner_piece, edge_piece, corner_goal, edge_goal)
+        pdb = _build_f2l_pair_pdb(
+            corner_piece,
+            edge_piece,
+            corner_goal,
+            edge_goal,
+            corner_orientation_goal,
+            edge_orientation_goal,
+        )
         _F2L_PAIR_PDBS[key] = pdb
     corner_pos = cube.cp.index(corner_piece)
     edge_pos = cube.ep.index(edge_piece)
     return pdb[(corner_pos, cube.co[corner_pos], edge_pos, cube.eo[edge_pos])]
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, kw_only=True)
 class _F2LSearch:
     target_corner: int
     target_edge: int
     target_corner_goal: int
     target_edge_goal: int
+    target_corner_orientation_goal: int
+    target_edge_orientation_goal: int
     protected_slots: tuple[tuple[int, int], ...]
     protected_pieces: tuple[tuple[int, int], ...]
+    protected_corner_orientations: tuple[int, ...]
+    protected_edge_orientations: tuple[int, ...]
     cross_pieces: tuple[int, ...]
     cross_positions: tuple[int, ...]
     allowed_faces: tuple[str, ...]
@@ -430,17 +457,23 @@ class _F2LSearch:
     def _goal(self, cube: CubeState) -> bool:
         return (
             _cross_goal(cube, self.cross_pieces, self.cross_positions)
-            and f2l_slot_solved(
-                cube,
-                self.target_corner_goal,
-                self.target_edge_goal,
-                self.target_corner,
-                self.target_edge,
+            and (
+                cube.cp[self.target_corner_goal] == self.target_corner
+                and cube.co[self.target_corner_goal] == self.target_corner_orientation_goal
+                and cube.ep[self.target_edge_goal] == self.target_edge
+                and cube.eo[self.target_edge_goal] == self.target_edge_orientation_goal
             )
             and all(
-                f2l_slot_solved(cube, corner_goal, edge_goal, corner_piece, edge_piece)
-                for (corner_goal, edge_goal), (corner_piece, edge_piece) in zip(
-                    self.protected_slots, self.protected_pieces
+                cube.cp[corner_goal] == corner_piece
+                and cube.co[corner_goal] == corner_orientation
+                and cube.ep[edge_goal] == edge_piece
+                and cube.eo[edge_goal] == edge_orientation
+                for (corner_goal, edge_goal), (corner_piece, edge_piece), corner_orientation, edge_orientation
+                in zip(
+                    self.protected_slots,
+                    self.protected_pieces,
+                    self.protected_corner_orientations,
+                    self.protected_edge_orientations,
                 )
             )
         )
@@ -454,12 +487,26 @@ class _F2LSearch:
                 self.target_edge,
                 self.target_corner_goal,
                 self.target_edge_goal,
+                self.target_corner_orientation_goal,
+                self.target_edge_orientation_goal,
             ),
         ]
         values.extend(
-            _f2l_pair_heuristic(cube, corner_piece, edge_piece, corner_goal, edge_goal)
-            for (corner_goal, edge_goal), (corner_piece, edge_piece) in zip(
-                self.protected_slots, self.protected_pieces
+            _f2l_pair_heuristic(
+                cube,
+                corner_piece,
+                edge_piece,
+                corner_goal,
+                edge_goal,
+                corner_orientation,
+                edge_orientation,
+            )
+            for (corner_goal, edge_goal), (corner_piece, edge_piece), corner_orientation, edge_orientation
+            in zip(
+                self.protected_slots,
+                self.protected_pieces,
+                self.protected_corner_orientations,
+                self.protected_edge_orientations,
             )
         )
         return max(values)
@@ -493,6 +540,11 @@ class _F2LSearch:
             ),
         )
         for move in ordered_moves:
+            move_face = move[0]
+            if move_face == "R" and any(token[0] == "L" for token in self.path):
+                continue
+            if move_face == "L" and any(token[0] == "R" for token in self.path):
+                continue
             if previous_face is not None and move[0] == previous_face:
                 continue
             self.path.append(move)
@@ -502,8 +554,102 @@ class _F2LSearch:
                 return result
         return None
 
+def _y_rotation_tokens(frame: int) -> tuple[str, ...]:
+    frame %= 4
+    if frame == 0:
+        return ()
+    if frame == 1:
+        return ("y",)
+    if frame == 2:
+        return ("y2",)
+    return ("y'",)
+
+
+def _f2l_move_profile(moves: tuple[str, ...]) -> tuple[int, int, int, int]:
+    """Score F2L execution difficulty; lower is better.
+
+    B is deliberately weighted most heavily because it is the least convenient
+    layer for the intended right/left-hand F2L execution. D is mildly penalized.
+    L has the same ergonomic weight as R.
+    """
+    hard = 0
+    b_moves = 0
+    doubles = 0
+    for move in moves:
+        base = move[0]
+        if base == "B":
+            hard += 8
+            b_moves += 1
+            if move.endswith("2"):
+                hard += 4
+        elif base == "D":
+            hard += 2
+        if move.endswith("2"):
+            doubles += 1
+    return hard, len(moves), b_moves, doubles
+
+
+_F2L_U_CORNER_POSITIONS = frozenset((0, 1, 2, 3))
+_F2L_U_EDGE_POSITIONS = frozenset((0, 1, 2, 3))
+_F2L_SLOT_EDGE_BY_CORNER = {4: 8, 5: 9, 6: 10, 7: 11}
+
+
+def _f2l_pair_readiness(
+    cube: CubeState,
+    corner_piece: int,
+    edge_piece: int,
+) -> tuple[int, str]:
+    """Recognize whether a pair is already prepared before running IDA*.
+
+    Lower tiers are easier for human-style F2L selection:
+
+    0. Both pieces are on U, adjacent, and oriented as a ready pair.
+    1. Both pieces are already connected in an F2L slot, but the slot is not
+       the pair's solved home (a paired-but-wrong case).
+    2. Both pieces are on U and adjacent, so only a U-layer setup/alignment
+       decision is needed before the standard insertion recognition.
+    3. One piece is already in an F2L slot and the partner is on U.
+    4. General case: the pair needs normal extraction/setup/search.
+
+    This is deliberately a recognition hint, not a correctness condition.
+    IDA* still computes the exact pair solution afterward.
+    """
+    corner_pos = cube.cp.index(corner_piece)
+    edge_pos = cube.ep.index(edge_piece)
+
+    if corner_pos in _F2L_U_CORNER_POSITIONS and edge_pos in _F2L_U_EDGE_POSITIONS:
+        # UFR↔UF, UFL↔UF, ULB↔UB/UL, UBR↔UB/UR are the two adjacent
+        # top-layer relationships around each corner. A ready F2L picture
+        # has the D-color facing a side (corner orientation != 0) and an
+        # oriented matching edge. U turns then choose the working side.
+        adjacent = {
+            0: frozenset((0, 1)),
+            1: frozenset((1, 2)),
+            2: frozenset((2, 3)),
+            3: frozenset((3, 0)),
+        }
+        if edge_pos in adjacent[corner_pos]:
+            if cube.co[corner_pos] != 0 and cube.eo[edge_pos] == 0:
+                return 0, "u_ready_pair"
+            return 2, "u_adjacent_setup"
+
+    if corner_pos in _F2L_SLOT_EDGE_BY_CORNER and edge_pos == _F2L_SLOT_EDGE_BY_CORNER[corner_pos]:
+        return 1, "paired_in_slot"
+
+    if (
+        corner_pos in _F2L_SLOT_EDGE_BY_CORNER
+        or edge_pos in _F2L_SLOT_EDGE_BY_CORNER.values()
+    ) and (
+        corner_pos in _F2L_U_CORNER_POSITIONS
+        or edge_pos in _F2L_U_EDGE_POSITIONS
+    ):
+        return 3, "one_piece_in_slot"
+
+    return 4, "unprepared"
+
+
 class F2LSolver(Solver):
-    """CFOP F2L solver that inserts one corner-edge pair at a time."""
+    """Flexible CFOP F2L solver with dynamic pair ordering and limited y orientation."""
 
     method = "cfop-f2l"
 
@@ -517,6 +663,7 @@ class F2LSolver(Solver):
         pieces: tuple[tuple[int, int], ...] = _F2L_SLOTS,
         cross_pieces: tuple[int, ...] = _CROSS_EDGES,
         cross_positions: tuple[int, ...] = _CROSS_EDGES,
+        initial_frame: int = 0,
     ) -> None:
         self.max_depth = max_depth
         self.max_nodes = max_nodes
@@ -525,54 +672,212 @@ class F2LSolver(Solver):
         self.pieces = pieces
         self.cross_pieces = cross_pieces
         self.cross_positions = cross_positions
+        self.initial_frame = initial_frame % 4
 
-    def solve(self, cube: CubeState) -> Solution:
+    def _search_pair(
+        self,
+        state: CubeState,
+        pair_index: int,
+        solved_indices: tuple[int, ...],
+        frame: int,
+        timeout_seconds: float | None = None,
+    ) -> tuple[tuple[str, ...], tuple[str, ...], int]:
+        """Search one pair in a rotated frame.
+
+        Returns (physical-frame moves, canonical-frame equivalent moves, nodes).
+        """
+        frame_rotation = " ".join(_y_rotation_tokens(frame))
+        frame_state = (
+            _apply_oll_algorithm(state, frame_rotation)
+            if frame_rotation
+            else state
+        )
+        frame_reference = (
+            _apply_oll_algorithm(CubeState.solved(), frame_rotation)
+            if frame_rotation
+            else CubeState.solved()
+        )
+
+        target_corner, target_edge = self.pieces[pair_index]
+        target_corner_goal = frame_reference.cp.index(target_corner)
+        target_edge_goal = frame_reference.ep.index(target_edge)
+        target_corner_orientation_goal = frame_reference.co[target_corner_goal]
+        target_edge_orientation_goal = frame_reference.eo[target_edge_goal]
+
+        protected_pieces = tuple(self.pieces[i] for i in solved_indices)
+        protected = tuple(
+            (
+                frame_reference.cp.index(corner_piece),
+                frame_reference.ep.index(edge_piece),
+            )
+            for corner_piece, edge_piece in protected_pieces
+        )
+        protected_corner_orientations = tuple(
+            frame_reference.co[corner_goal] for corner_goal, _ in protected
+        )
+        protected_edge_orientations = tuple(
+            frame_reference.eo[edge_goal] for _, edge_goal in protected
+        )
+        # The search state is physically rotated into the selected y-frame, so
+        # the Cross goal must be rotated with it as well. Keeping the original
+        # positions here can make IDA* accept a pair solution that restores the
+        # pair but corrupts the Cross when conjugated back to the canonical
+        # frame.
+        cross_pieces = self.cross_pieces
+        cross_positions = tuple(
+            frame_reference.ep.index(edge_piece) for edge_piece in cross_pieces
+        )
+        goal_slot_index = next(
+            index
+            for index, (corner_goal, edge_goal) in enumerate(self.slots)
+            if corner_goal == target_corner_goal and edge_goal == target_edge_goal
+        )
+        frame_slot_faces = _F2L_SLOT_FACES[goal_slot_index]
+        search = _F2LSearch(
+            target_corner=target_corner,
+            target_edge=target_edge,
+            target_corner_goal=target_corner_goal,
+            target_edge_goal=target_edge_goal,
+            target_corner_orientation_goal=target_corner_orientation_goal,
+            target_edge_orientation_goal=target_edge_orientation_goal,
+            protected_slots=protected,
+            protected_pieces=protected_pieces,
+            protected_corner_orientations=protected_corner_orientations,
+            protected_edge_orientations=protected_edge_orientations,
+            allowed_faces=frame_slot_faces,
+            max_depth=self.max_depth,
+            max_nodes=self.max_nodes,
+            timeout_seconds=self.timeout_seconds if timeout_seconds is None else timeout_seconds,
+            cross_pieces=cross_pieces,
+            cross_positions=cross_positions,
+        )
+        moves = search.solve(frame_state)
+        inverse_frame = _y_rotation_tokens((-frame) % 4)
+        frame_tokens = _y_rotation_tokens(frame)
+        canonical_moves = frame_tokens + moves + inverse_frame
+        return moves, canonical_moves, search.nodes
+
+    def solve(self, cube: CubeState, initial_frame: int | None = None) -> Solution:
         if not _cross_goal(cube, self.cross_pieces, self.cross_positions):
             raise RuntimeError("F2L requires a solved CFOP Cross")
 
         state = cube
+        current_frame = self.initial_frame if initial_frame is None else initial_frame % 4
+        solved_indices: list[int] = []
         phases: list[SolutionPhase] = []
         total_moves: list[str] = []
+        canonical_moves: list[str] = []
         total_nodes = 0
+        pair_order: list[int] = []
+        orientation_changes = 0
+        pair_readiness: list[str] = []
 
-        for index, ((corner_goal, edge_goal), (corner, edge)) in enumerate(
-            zip(self.slots, self.pieces), start=1
-        ):
-            protected = self.slots[: index - 1]
-            protected_pieces = self.pieces[: index - 1]
-            search = _F2LSearch(
-                target_corner=corner,
-                target_edge=edge,
-                target_corner_goal=corner_goal,
-                target_edge_goal=edge_goal,
-                protected_slots=protected,
-                protected_pieces=protected_pieces,
-                allowed_faces=_F2L_SLOT_FACES[index - 1],
-                max_depth=self.max_depth,
-                max_nodes=self.max_nodes,
-                timeout_seconds=self.timeout_seconds,
-                cross_pieces=self.cross_pieces,
-                cross_positions=self.cross_positions,
-            )
-            moves = search.solve(state)
-            for move in moves:
-                state = apply_move(state, move)
-            if not f2l_slot_solved(state, corner_goal, edge_goal, corner, edge):
-                raise RuntimeError(f"F2L slot {index} returned an invalid solution")
-            total_nodes += search.nodes
-            total_moves.extend(moves)
+        while len(solved_indices) < len(self.slots):
+            remaining = [i for i in range(len(self.slots)) if i not in solved_indices]
+            base_candidates: list[
+                tuple[tuple[int, int, int, int], int, tuple[str, ...], tuple[str, ...], int, int, str]
+            ] = []
+
+            for pair_index in remaining:
+                moves, canonical, nodes = self._search_pair(
+                    state, pair_index, tuple(solved_indices), current_frame
+                )
+                profile = _f2l_move_profile(moves)
+                readiness, readiness_name = _f2l_pair_readiness(
+                    _apply_oll_algorithm(state, " ".join(_y_rotation_tokens(current_frame)))
+                    if current_frame
+                    else state,
+                    self.pieces[pair_index][0],
+                    self.pieces[pair_index][1],
+                )
+                base_candidates.append(
+                    (profile, pair_index, moves, canonical, nodes, readiness, readiness_name)
+                )
+
+            base_candidates.sort(key=lambda item: (item[5], item[0]))
+            best = base_candidates[0]
+
+            # Investigate y/y' whenever the current-frame solution contains
+            # awkward turns. The rotation happens BEFORE this pair, so it is
+            # also valid for F2L-4; the important invariant is that we do not
+            # emit a rotation AFTER the final pair has been solved.
+            #
+            # Give the alternative-frame searches enough budget for IDA* to
+            # finish after a new frame-specific PDB entry is constructed. A
+            # short scout budget can otherwise make a B-heavy solution survive
+            # simply because both ergonomic alternatives timed out.
+            if best[0][0] > 0:
+                oriented_candidates = [best]
+                for new_frame in ((current_frame + 1) % 4, (current_frame - 1) % 4):
+                    try:
+                        moves, canonical, nodes = self._search_pair(
+                            state,
+                            best[1],
+                            tuple(solved_indices),
+                            new_frame,
+                            timeout_seconds=8.0 if self.timeout_seconds is None else min(self.timeout_seconds, 8.0),
+                        )
+                    except (TimeoutError, RuntimeError):
+                        continue
+                    delta = (new_frame - current_frame) % 4
+                    delta_moves = _y_rotation_tokens(delta)
+                    profile = _f2l_move_profile(moves)
+                    score = (
+                        profile[0],
+                        profile[1] + len(delta_moves),
+                        profile[2],
+                        profile[3],
+                    )
+                    oriented_candidates.append(
+                        (score, best[1], moves, canonical, nodes, best[5], best[6], new_frame, delta_moves)
+                    )
+
+                chosen = min(oriented_candidates, key=lambda item: item[0])
+                if len(chosen) == 9 and chosen[7] != current_frame:
+                    _, pair_index, moves, canonical, nodes, readiness, readiness_name, new_frame, delta_moves = chosen
+                    current_frame = new_frame
+                    orientation_changes += 1
+                    physical_phase_moves = delta_moves + moves
+                    best = (chosen[0], pair_index, moves, canonical, nodes, readiness, readiness_name)
+                else:
+                    _, pair_index, moves, canonical, nodes, readiness, readiness_name = best
+                    physical_phase_moves = moves
+            else:
+                _, pair_index, moves, canonical, nodes, readiness, readiness_name = best
+                physical_phase_moves = moves
+
+            # Apply the canonical equivalent so the internal solver state stays
+            # in the fixed D-Cross coordinate frame. Extended y rotations
+            # are executed through the vendored engine for exact semantics.
+            state = _apply_oll_algorithm(state, " ".join(canonical)) if canonical else state
+            if not f2l_slot_solved(
+                state,
+                self.slots[pair_index][0],
+                self.slots[pair_index][1],
+                self.pieces[pair_index][0],
+                self.pieces[pair_index][1],
+            ):
+                raise RuntimeError(f"F2L pair {pair_index + 1} returned an invalid solution")
+
+            solved_indices.append(pair_index)
+            pair_order.append(pair_index + 1)
+            total_nodes += nodes
+            total_moves.extend(physical_phase_moves)
+            canonical_moves.extend(canonical)
+            pair_readiness.append(readiness_name)
             phases.append(
                 SolutionPhase(
-                    name=f"F2L-{index}",
-                    moves=moves,
-                    description=f"Solve F2L corner-edge pair {index} while preserving previous pairs.",
+                    name=f"F2L-{len(phases) + 1}",
+                    moves=physical_phase_moves,
+                    description=(
+                        f"Solve F2L pair {pair_index + 1} selected by ergonomic score "
+                        f"(finger-trick difficulty before move count)."
+                    ),
                 )
             )
 
-        if not all(
-            f2l_slot_solved(state, corner_goal, edge_goal, corner, edge)
-            for (corner_goal, edge_goal), (corner, edge) in zip(self.slots, self.pieces)
-        ) or not _cross_goal(state, self.cross_pieces, self.cross_positions):
+        if not f2l_solved(state, slots=self.slots, pieces=self.pieces,
+                           cross_pieces=self.cross_pieces, cross_positions=self.cross_positions):
             raise RuntimeError("F2L returned an invalid first-two-layers state")
 
         return Solution(
@@ -583,9 +888,15 @@ class F2LSolver(Solver):
             phases=tuple(phases),
             metadata={
                 "algorithm": "CFOP F2L",
-                "search": "IDA* with exact corner-edge pair PDB and human-style move ordering",
+                "search": "IDA* with exact pair PDB; dynamic pair ordering and ergonomic scoring",
                 "nodes": total_nodes,
                 "slots": len(self.slots),
+                "pair_order": pair_order,
+                "orientation_changes": orientation_changes,
+                "pair_readiness": pair_readiness,
+                "initial_frame": self.initial_frame,
+                "final_frame": current_frame,
+                "canonical_moves": canonical_moves,
             },
         )
 
@@ -1108,56 +1419,92 @@ class CFOPSolver(Solver):
         self.pll_solver = PLLSolver()
 
     def solve(self, cube: CubeState) -> Solution:
-        # x2 puts white on D. A y rotation before x2 is equivalent to the
-        # inverse y rotation after x2, so solve Cross once in the canonical
-        # x2 frame and evaluate all four front-face choices by conjugating the
-        # same Cross. This keeps the actual search on D while allowing the
-        # returned execution to favor finger-trick-friendly faces.
+        # x2 puts white on D. Choose the Cross front-face orientation first;
+        # F2L receives that same frame and may keep it while solving several
+        # pairs, only changing y when the ergonomic score clearly improves.
         state = _to_x2_coordinate_frame(cube)
         cross_result = self.cross_solver.solve(state)
-        orientation_candidates: list[tuple[tuple[int, int, int, int], str, tuple[str, ...]]] = []
-        for y_count, y_cost in ((0, 0), (1, 1), (2, 2), (3, 1)):
-            y_after_x2 = " ".join(("y'",) * y_count)
-            y_conjugation = " ".join(("y",) * y_count)
-            cross_moves = _conjugate_moves(y_conjugation, cross_result.moves) if y_conjugation else cross_result.moves
-            awkward = sum(move[0] in {"B", "L", "D"} for move in cross_moves)
-            doubles = sum(move.endswith("2") for move in cross_moves)
-            score = (len(cross_moves), awkward, doubles, y_cost)
-            orientation_candidates.append((score, y_after_x2, cross_moves))
+        orientation_candidates = []
+        for frame in range(4):
+            y_after_x2 = " ".join(("y'",) * frame)
+            y_conjugation = " ".join(("y",) * frame)
+            cross_moves = (
+                _conjugate_moves(y_conjugation, cross_result.moves)
+                if y_conjugation
+                else cross_result.moves
+            )
+            profile = _f2l_move_profile(cross_moves)
+            score = (profile[0], profile[1], profile[3], frame if frame <= 2 else 1)
+            orientation_candidates.append((score, frame, cross_moves))
 
-        _, y_after_x2, cross_moves = min(orientation_candidates, key=lambda item: item[0])
-        y_conjugation = " ".join("y" for _ in y_after_x2.split())
-        orientation = " ".join(part for part in ("x2", y_after_x2) if part)
+        _, initial_frame, cross_moves = min(
+            orientation_candidates,
+            key=lambda item: item[0],
+        )
+        orientation = " ".join(
+            part for part in ("x2", *("y'",) * initial_frame) if part
+        )
         phases: list[SolutionPhase] = []
         orientation_moves = tuple(orientation.split())
         total_moves: list[str] = list(orientation_moves)
         phase_results: list[Solution] = []
 
+        # Keep the canonical Cross state for F2L. `cross_moves` is the
+        # physically conjugated presentation of the same Cross solution.
         state = apply_moves(state, cross_result.moves)
         phases.append(
             SolutionPhase(
                 name="Orientation",
                 moves=orientation_moves,
-                description="Orient the cube before Cross: x2 places white on D; y rotation chooses the most convenient Cross view.",
+                description="Orient the cube before Cross: x2 places white on D; y chooses a convenient Cross view.",
             )
         )
-        phases.extend(
+        phases.append(
             SolutionPhase(
-                name=phase.name,
+                name="Cross",
                 moves=cross_moves,
-                description=phase.description,
+                description=cross_result.phases[0].description,
             )
-            for phase in cross_result.phases
         )
         total_moves.extend(cross_moves)
         phase_results.append(cross_result)
 
-        for solver in (self.f2l_solver, self.oll_solver, self.pll_solver):
+        # Keep F2L's internal frame canonical. Its own y rotations are
+        # optimized independently, then the whole F2L sequence is conjugated
+        # into the Cross frame exactly once.
+        f2l_result = self.f2l_solver.solve(state, initial_frame=0)
+        canonical_f2l_moves = tuple(f2l_result.metadata["canonical_moves"])
+        state = _apply_oll_algorithm(state, " ".join(canonical_f2l_moves)) if canonical_f2l_moves else state
+        f2l_frame = " ".join(_y_rotation_tokens(initial_frame))
+        phases.extend(
+            SolutionPhase(
+                name=phase.name,
+                moves=_conjugate_moves(f2l_frame, phase.moves) if f2l_frame else phase.moves,
+                description=phase.description,
+            )
+            for phase in f2l_result.phases
+        )
+        total_moves.extend(
+            _conjugate_moves(f2l_frame, f2l_result.moves)
+            if f2l_frame
+            else f2l_result.moves
+        )
+        phase_results.append(f2l_result)
+
+        # The canonical F2L state stays in the fixed D-Cross coordinate frame.
+        # The physical F2L output keeps the last y frame, so OLL/PLL algorithms
+        # are conjugated by that carried frame below without rotating the
+        # internal recognition state away from the canonical slot layout.
+        # The physical F2L sequence intentionally keeps its final y-frame.
+        # OLL/PLL recognize the canonical state, but their stored algorithms
+        # are conjugated into that carried physical frame; no extra y rotation
+        # is emitted after F2L-4.
+        combined_frame = (
+            initial_frame - int(f2l_result.metadata["final_frame"])
+        ) % 4
+        frame = " ".join(_y_rotation_tokens(combined_frame))
+        for solver in (self.oll_solver, self.pll_solver):
             result = solver.solve(state)
-            # OLL/PLL algorithms may contain wide/slice/rotation notation
-            # (for example `r`, `M`, or `x`) which the core face-move model
-            # intentionally does not expose. Use the vendored engine as the
-            # move executor whenever a phase contains extended notation.
             if any(len(move) > 2 or move[0] not in "URFDLB" for move in result.moves):
                 state = _apply_oll_algorithm(state, " ".join(result.moves))
             else:
@@ -1165,21 +1512,22 @@ class CFOPSolver(Solver):
             phases.extend(
                 SolutionPhase(
                     name=phase.name,
-                    moves=_conjugate_moves(y_conjugation, phase.moves) if y_conjugation else phase.moves,
+                    moves=_conjugate_moves(frame, phase.moves) if frame else phase.moves,
                     description=phase.description,
                 )
                 for phase in result.phases
             )
-            total_moves.extend(_conjugate_moves(y_conjugation, result.moves) if y_conjugation else result.moves)
+            total_moves.extend(
+                _conjugate_moves(frame, result.moves) if frame else result.moves
+            )
             phase_results.append(result)
 
         if not pll_solved(state):
             raise RuntimeError("CFOP returned an invalid full-cube solution")
 
         final_state = _apply_oll_algorithm(cube, " ".join(total_moves))
-        expected_orientation = _apply_oll_algorithm(CubeState.solved(), orientation)
-        if final_state != expected_orientation:
-            raise RuntimeError("CFOP returned an invalid standard-orientation solution")
+        if not _cfop_solved(final_state):
+            raise RuntimeError("CFOP returned an invalid full-cube solution")
 
         return Solution(
             method=self.method,
