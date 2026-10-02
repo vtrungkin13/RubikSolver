@@ -541,10 +541,6 @@ class _F2LSearch:
         )
         for move in ordered_moves:
             move_face = move[0]
-            if move_face == "R" and any(token[0] == "L" for token in self.path):
-                continue
-            if move_face == "L" and any(token[0] == "R" for token in self.path):
-                continue
             if previous_face is not None and move[0] == previous_face:
                 continue
             self.path.append(move)

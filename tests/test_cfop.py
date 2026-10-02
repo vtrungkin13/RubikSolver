@@ -1,7 +1,14 @@
 from rubik_solver.cube.moves import apply_moves
 from rubik_solver.cube.parser import parse_scramble
 from rubik_solver.cube.state import CubeState
-from rubik_solver.solvers.cfop import CrossSolver, cross_solved
+from rubik_solver.solvers.cfop import (
+    CrossSolver,
+    _CROSS_EDGES,
+    _F2L_SLOTS,
+    _F2L_SLOT_FACES,
+    _F2LSearch,
+    cross_solved,
+)
 
 
 def scrambled(scramble: str) -> CubeState:
@@ -197,6 +204,31 @@ def test_f2l_integration_selects_ready_pair_before_less_ready_pair() -> None:
     result = F2LSolver(max_depth=14, timeout_seconds=10).solve(cube)
 
     assert result.verified is True
+
+
+def test_f2l_search_allows_r_and_l_in_same_pair() -> None:
+    corner, edge = _F2L_SLOTS[0]
+    cube = scrambled("R' L'")
+    search = _F2LSearch(
+        target_corner=corner,
+        target_edge=edge,
+        target_corner_goal=corner,
+        target_edge_goal=edge,
+        target_corner_orientation_goal=0,
+        target_edge_orientation_goal=0,
+        protected_slots=(),
+        protected_pieces=(),
+        protected_corner_orientations=(),
+        protected_edge_orientations=(),
+        cross_pieces=_CROSS_EDGES,
+        cross_positions=_CROSS_EDGES,
+        allowed_faces=_F2L_SLOT_FACES[0],
+        max_depth=2,
+        max_nodes=None,
+        timeout_seconds=5,
+    )
+
+    assert search.solve(cube) == ("R", "L")
     assert result.metadata["pair_order"][0] == 1
     assert result.metadata["pair_readiness"][0] == "u_ready_pair"
     after = _apply_oll_algorithm(cube, " ".join(result.metadata["canonical_moves"]))

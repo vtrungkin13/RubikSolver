@@ -1395,3 +1395,15 @@ Full suite: 77 passed in 14.25s
 - Build a smaller targeted benchmark set biased toward the two patterns discovered here: `one_piece_in_slot` vs `unprepared` competition and cases where frame alternatives differ materially in B count.
 - Compare current recognition-first scoring against a diagnostic ergonomic-first ordering without committing the latter; use the comparison to decide whether recognition priority is causing avoidable B turns.
 - If the diagnostic shows a consistent improvement without correctness/search regressions, add deterministic regression(s), rerun the full suite, update this worklog, and commit.
+
+### 2026-10-02 - Allow R and L together within one F2L pair search
+
+- Removed the `_F2LSearch._dfs()` pruning rule that rejected any path containing both `R` and `L` moves.
+- R/L mixing is now legal within a single pair search; the existing same-face consecutive-move pruning remains unchanged.
+- Added deterministic regression `test_f2l_search_allows_r_and_l_in_same_pair` using the state `R' L'`; the depth-2 search now returns `R L`.
+- This intentionally does **not** change the B penalty: B remains ergonomically more expensive, while R+L can be used when it produces a better execution path.
+- The direct regression passed. Full CFOP execution became substantially slower after widening the search space, so the long-running duplicate test/benchmark processes were stopped rather than left running indefinitely; no correctness failure was observed before stopping.
+
+**NEXT ACTION:**
+- Benchmark the widened R/L search with a small, controlled sample and measure B count, R+L occurrences, solution length, and runtime separately.
+- If search-time cost is too high, optimize move ordering/pruning without reintroducing the R/L mutual exclusion.
