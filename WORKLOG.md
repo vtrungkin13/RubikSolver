@@ -1343,3 +1343,22 @@ Full suite: 77 passed in 14.25s
 **NEXT ACTION:**
 - Validate the new lookahead on broader/randomized F2L scrambles, especially setup/paired cases and B-heavy cases, and inspect whether it improves human-style execution without increasing search time excessively.
 - If stable, continue F2L recognition refinement; defer M6 Roux until the current F2L ergonomics/recognition pass is considered stable.
+
+### 2026-10-02 - Randomized F2L lookahead validation
+
+**Completed:**
+- Ran a deterministic 20-scramble randomized F2L benchmark against seed `20261002`.
+- 18/20 cases completed within the existing 10s F2L timeout; 2 cases timed out, so the timeout issue remains an existing search-performance concern rather than something to mask by raising the global timeout.
+- Among the 18 completed cases, average F2L output was 23.39 moves and average B-turn count was 0.22; only 2 completed cases contained B turns, with 2 B turns each.
+- The benchmark included scrambles containing many B moves, yet the generated F2L output generally avoided B turns, supporting the current R/U/F/L-oriented ergonomic scoring.
+- No correctness failures were observed in completed cases.
+- The remaining B-heavy cases were isolated for targeted recognition/ergonomic refinement rather than changing timeout policy.
+
+**Decision:**
+- Keep the lookahead implementation and current timeout unchanged.
+- Do not treat the low B frequency as proof of optimality; continue targeting the remaining B-producing cases and paired/setup recognition.
+
+**NEXT ACTION:**
+- Investigate the remaining B-producing F2L cases at the candidate-selection level: determine whether an alternative valid insertion/frame with R/U/F/L execution exists and why the current scoring does not select it.
+- Add deterministic regressions for any discovered recognition/scoring pattern, then rerun the full suite before the next checkpoint.
+- Continue to defer M6 Roux while F2L ergonomic refinement is active.
