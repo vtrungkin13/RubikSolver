@@ -1321,3 +1321,25 @@ Full suite: 77 passed in 14.25s
 - Treat the current F2L recognition-priority regression as stable.
 - Continue broader F2L case-recognition/lookahead refinement, with emphasis on setup/paired cases and human-style execution.
 - Do not move to M6 Roux yet if further F2L ergonomic/recognition issues remain.
+
+### 2026-10-02 - F2L next-pair lookahead refinement
+
+**Completed:**
+- Added `_f2l_lookahead_profile()` to recognize how the current pair insertion sets up the remaining F2L pairs.
+- F2L candidate selection now uses next-pair readiness as a tie-breaker after the existing recognition tier and ergonomic profile, favoring states that expose a ready/paired/setup case for the next pair.
+- Applied the same lookahead tie-breaker to y-frame alternatives so frame selection does not discard a better continuation.
+- Added a deterministic unit regression for recognizing a ready next pair.
+- Kept correctness objective and exact pair-search depth unchanged; lookahead only affects candidate ordering.
+
+**Verification:**
+- CFOP suite: 23 passed in 69.67s.
+- Full project suite: 102 passed in 97.08s.
+- git diff --check: passed (only normal Git LF→CRLF warnings).
+- Working tree contains only the intended F2L solver/test changes before checkpoint.
+
+**Decision:**
+- Lookahead is now part of F2L human-style candidate selection, but it remains a tie-breaker rather than a hard constraint.
+
+**NEXT ACTION:**
+- Validate the new lookahead on broader/randomized F2L scrambles, especially setup/paired cases and B-heavy cases, and inspect whether it improves human-style execution without increasing search time excessively.
+- If stable, continue F2L recognition refinement; defer M6 Roux until the current F2L ergonomics/recognition pass is considered stable.

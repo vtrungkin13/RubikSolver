@@ -648,6 +648,29 @@ def _f2l_pair_readiness(
     return 4, "unprepared"
 
 
+def _f2l_lookahead_profile(
+    cube: CubeState,
+    remaining_pairs: list[int] | tuple[int, ...],
+    pieces: tuple[tuple[int, int], ...] = _F2L_SLOTS,
+) -> tuple[int, int, int]:
+    """Score how well the resulting state sets up the next F2L pair.
+
+    Human F2L benefits from recognizing the next pair while inserting the
+    current one. Prefer states that expose a ready/paired next case, then
+    states with more setup-ready pairs. This is only a tie-breaker after the
+    current pair's recognition and ergonomic profile, so it cannot override
+    the primary case choice or correctness objective.
+    """
+    if not remaining_pairs:
+        return (4, 0, 0)
+
+    tiers = [
+        _f2l_pair_readiness(cube, pieces[index][0], pieces[index][1])[0]
+        for index in remaining_pairs
+    ]
+    return (min(tiers), sum(tier == 0 for tier in tiers), sum(tier <= 2 for tier in tiers))
+
+
 class F2LSolver(Solver):
     """Flexible CFOP F2L solver with dynamic pair ordering and limited y orientation."""
 
@@ -775,7 +798,7 @@ class F2LSolver(Solver):
         while len(solved_indices) < len(self.slots):
             remaining = [i for i in range(len(self.slots)) if i not in solved_indices]
             base_candidates: list[
-                tuple[tuple[int, int, int, int], int, tuple[str, ...], tuple[str, ...], int, int, str]
+                tuple[tuple[int, int, int, int], int, tuple[str, ...], tuple[str, ...], int, int, str, tuple[int, int, int]]
             ] = []
 
             for pair_index in remaining:
@@ -790,11 +813,17 @@ class F2LSolver(Solver):
                     self.pieces[pair_index][0],
                     self.pieces[pair_index][1],
                 )
+                resulting_state = _apply_oll_algorithm(state, " ".join(canonical)) if canonical else state
+                lookahead = _f2l_lookahead_profile(
+                    resulting_state,
+                    [index for index in remaining if index != pair_index],
+                    self.pieces,
+                )
                 base_candidates.append(
-                    (profile, pair_index, moves, canonical, nodes, readiness, readiness_name)
+                    (profile, pair_index, moves, canonical, nodes, readiness, readiness_name, lookahead)
                 )
 
-            base_candidates.sort(key=lambda item: (item[5], item[0]))
+            base_candidates.sort(key=lambda item: (item[5], item[0], tuple(-value for value in item[7])))
             best = base_candidates[0]
 
             # Investigate y/y' whenever the current-frame solution contains
@@ -828,22 +857,31 @@ class F2LSolver(Solver):
                         profile[2],
                         profile[3],
                     )
+                    resulting_state = _apply_oll_algorithm(state, " ".join(canonical)) if canonical else state
+                    lookahead = _f2l_lookahead_profile(
+                        resulting_state,
+                        [index for index in remaining if index != best[1]],
+                        self.pieces,
+                    )
                     oriented_candidates.append(
-                        (score, best[1], moves, canonical, nodes, best[5], best[6], new_frame, delta_moves)
+                        (score, best[1], moves, canonical, nodes, best[5], best[6], new_frame, delta_moves, lookahead)
                     )
 
-                chosen = min(oriented_candidates, key=lambda item: item[0])
-                if len(chosen) == 9 and chosen[7] != current_frame:
-                    _, pair_index, moves, canonical, nodes, readiness, readiness_name, new_frame, delta_moves = chosen
+                chosen = min(
+                    oriented_candidates,
+                    key=lambda item: (item[0], tuple(-value for value in item[9])) if len(item) == 10 else (item[0], (0, 0, 0)),
+                )
+                if len(chosen) == 10 and chosen[7] != current_frame:
+                    _, pair_index, moves, canonical, nodes, readiness, readiness_name, new_frame, delta_moves, lookahead = chosen
                     current_frame = new_frame
                     orientation_changes += 1
                     physical_phase_moves = delta_moves + moves
-                    best = (chosen[0], pair_index, moves, canonical, nodes, readiness, readiness_name)
+                    best = (chosen[0], pair_index, moves, canonical, nodes, readiness, readiness_name, lookahead)
                 else:
-                    _, pair_index, moves, canonical, nodes, readiness, readiness_name = best
+                    _, pair_index, moves, canonical, nodes, readiness, readiness_name, _ = best
                     physical_phase_moves = moves
             else:
-                _, pair_index, moves, canonical, nodes, readiness, readiness_name = best
+                _, pair_index, moves, canonical, nodes, readiness, readiness_name, _ = best
                 physical_phase_moves = moves
 
             # Apply the canonical equivalent so the internal solver state stays
@@ -894,6 +932,7 @@ class F2LSolver(Solver):
                 "pair_order": pair_order,
                 "orientation_changes": orientation_changes,
                 "pair_readiness": pair_readiness,
+                "lookahead": "next-pair recognition tie-breaker",
                 "initial_frame": self.initial_frame,
                 "final_frame": current_frame,
                 "canonical_moves": canonical_moves,

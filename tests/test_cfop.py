@@ -203,6 +203,22 @@ def test_f2l_integration_selects_ready_pair_before_less_ready_pair() -> None:
     assert f2l_solved(after)
 
 
+def test_f2l_lookahead_prefers_state_with_ready_next_pair() -> None:
+    from rubik_solver.solvers.cfop import _f2l_lookahead_profile
+
+    # Expose pair 2 as a ready U-layer pair. The lookahead helper should
+    # recognize that as a stronger continuation than the solved-slot state.
+    ready_next = CubeState(
+        cp=(0, 5, 2, 3, 4, 1, 6, 7),
+        co=(0, 1, 0, 0, 0, 0, 0, 0),
+        ep=(0, 9, 2, 3, 4, 5, 6, 7, 8, 1, 10, 11),
+        eo=(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+    )
+    unprepared = CubeState.solved()
+    assert _f2l_lookahead_profile(ready_next, (1, 2, 3))[0] == 0
+    assert _f2l_lookahead_profile(unprepared, (1, 2, 3))[0] == 1
+
+
 def test_f2l_y_frame_search_preserves_canonical_pair() -> None:
     from rubik_solver.solvers.cfop import (
         CrossSolver,
