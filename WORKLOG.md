@@ -1362,3 +1362,36 @@ Full suite: 77 passed in 14.25s
 - Investigate the remaining B-producing F2L cases at the candidate-selection level: determine whether an alternative valid insertion/frame with R/U/F/L execution exists and why the current scoring does not select it.
 - Add deterministic regressions for any discovered recognition/scoring pattern, then rerun the full suite before the next checkpoint.
 - Continue to defer M6 Roux while F2L ergonomic refinement is active.
+
+### 2026-10-02 - Targeted investigation of remaining B-producing cases + follow-up benchmark
+
+**Targeted investigation:**
+- Replayed the two previously isolated B-producing scrambles at candidate/frame level instead of changing scoring blindly.
+- Case 1: `D' R B R R2 F2 R L F B' L' R' D' U`.
+  - At the B-producing insertion for pair 1, current frame had `(16, 6, 2, 0)` with `F' B' U B U F`.
+  - Both y/y' alternatives still contained 2 B turns.
+  - At the later B-producing pair 3 insertion, y' produced `y' L D F D' L' y` with hard score 4 and **0 B**, and the real solver now selects that frame.
+  - Therefore the remaining B in this case is not caused by an inability to use rotation; it occurs at an earlier insertion where the alternate frames are also B-heavy.
+- Case 2: `B2 R' B' D2 D2 L F2 B L D U2 L' B2 L`.
+  - For the B-producing pair 4 insertion, current frame had `(24, 7, 2, 3)`; y/y' alternatives improved to `(16, 8, 2, 0)` but still retained 2 B turns.
+  - This case therefore also does not justify a blanket frame/scoring change yet.
+- The investigation did expose a recognition trade-off in Case 1: at one earlier step an `unprepared` pair had a B-free current-frame candidate while the selected `one_piece_in_slot` pair was B-heavy. This is intentional under the current recognition-first policy and needs broader evidence before changing priority.
+
+**Follow-up benchmark:**
+- Started a fresh deterministic batch with seed `20261004`, unchanged `CrossSolver(max_depth=8, timeout_seconds=5)` and `F2LSolver(max_depth=14, timeout_seconds=10)`.
+- 3 additional cases completed before the next case became a long-running search outlier:
+  - case 1: 0 B, 27 F2L moves, 18.36s;
+  - case 2: 0 B, 28 F2L moves, 2.53s;
+  - case 3: 2 B, 22 F2L moves, 15.25s.
+- Partial additional sample: 3/3 completed cases had no correctness failure; 2/3 had 0 B and 1/3 had 2 B.
+- A planned 10-case batch was intentionally stopped when case 4 became excessively long, confirming again that search-time variability is a material benchmark concern. The temporary benchmark script was removed; no project source files were left behind.
+
+**Decision:**
+- Do not alter recognition-tier priority or B scoring from these cases alone.
+- Keep the current y-frame refinement: it demonstrably removes B in cases where an ergonomic alternative exists.
+- Treat search-time variability as the next performance investigation target if it continues to dominate larger benchmarks.
+
+**NEXT ACTION:**
+- Build a smaller targeted benchmark set biased toward the two patterns discovered here: `one_piece_in_slot` vs `unprepared` competition and cases where frame alternatives differ materially in B count.
+- Compare current recognition-first scoring against a diagnostic ergonomic-first ordering without committing the latter; use the comparison to decide whether recognition priority is causing avoidable B turns.
+- If the diagnostic shows a consistent improvement without correctness/search regressions, add deterministic regression(s), rerun the full suite, update this worklog, and commit.
