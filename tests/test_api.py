@@ -52,8 +52,11 @@ def test_solve_endpoint_reports_unavailable_solver() -> None:
         json={"scramble": "R U", "method": "roux"},
     )
 
-    assert response.status_code == 501
-    assert response.json()["detail"]["code"] == "SOLVER_UNAVAILABLE"
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["method"] == "roux"
+    assert payload["verified"] is True
+    assert payload["phases"][0]["name"] == "First Block"
 
 
 def test_solve_endpoint_supports_cfop() -> None:

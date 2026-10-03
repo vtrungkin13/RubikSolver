@@ -22,8 +22,8 @@
 | M2 | Scramble parser + validator | âœ… HoÃ n thÃ nh | Parser/normalizer/inverse + validation edge-case tests |
 | M3 | Search foundation | âœ… HoÃ n thÃ nh | IDA* + admissible heuristic + pruning + resource limits + verification tests |
 | M4 | Kociemba | âœ… HoÃ n thÃ nh | Pure-Python vendored engine, solution verification |
-| M5 | CFOP | Dang lam | Cross done -> F2L done -> OLL done (1-look 57 cases) -> PLL done (21 cases) |
-| M6 | Roux | â³ ChÆ°a lÃ m | FB â†’ SB â†’ CMLL â†’ LSE |
+| M5 | CFOP | PENDING | Current implementation retained; remaining ergonomic/search benchmark work is deferred. |
+| M6 | Roux | IN PROGRESS | FB + SB + CMLL complete; LSE remains. |
 | M7 | Optimal | â³ ChÆ°a lÃ m | IDA* + pruning/PDB/symmetry |
 | M8 | Web UI hoÃ n chá»‰nh | â³ ChÆ°a lÃ m | Skeleton cÃ³ sáºµn; cáº§n ná»‘i/render API Ä‘áº§y Ä‘á»§ |
 
@@ -1407,3 +1407,301 @@ Full suite: 77 passed in 14.25s
 **NEXT ACTION:**
 - Benchmark the widened R/L search with a small, controlled sample and measure B count, R+L occurrences, solution length, and runtime separately.
 - If search-time cost is too high, optimize move ordering/pruning without reintroducing the R/L mutual exclusion.
+
+### 2026-10-02 - M5 moved to PENDING / M6 Roux started
+
+**Milestone status change:**
+- M5 CFOP is explicitly marked **PENDING**, not completed.
+- The current CFOP implementation and F2L ergonomic/recognition work remain intact and are not reverted.
+- The remaining M5 work can be resumed later, especially the controlled benchmark and search-performance optimization after allowing R+L within one pair.
+
+**M6 started:**
+- Added RouxSolver scaffold under src/rubik_solver/solvers/roux.py.
+- Registered roux in the solver registry so the existing Solver/API architecture can dispatch the method.
+- Established the planned Roux phase contract: First Block -> Second Block -> CMLL -> LSE.
+- The current scaffold uses a verified Kociemba fallback temporarily; this is explicitly marked status=scaffold and is **not** considered a Roux solution yet.
+- This keeps API/solver integration testable while the actual Roux phase implementations are developed incrementally.
+
+**Verification:**
+- CFOP/API regression suite started after the registry change and is still running; no failure has been reported so far.
+
+**Milestone status:**
+- M5: **PENDING**
+- M6: **IN PROGRESS**
+
+**NEXT ACTION:**
+- Finish the running regression suite, then implement the actual Roux First Block phase with its own state goal, search, phase metadata, and correctness regression tests.
+## 2026-10-02 - M6 Roux First Block started
+
+- M5 remains `PENDING`; no CFOP rollback or automatic Git commit was made.
+- Replaced the Roux Kociemba scaffold behavior with an actual incremental **First Block (FB)** phase.
+- FB canonical target: left block using corners `DLF/DBL` and edges `FL/DL`, with exact piece placement and orientation.
+- FB contract was corrected: the block bottom is now required to be **white**, while the white center is not treated as a required D-center. The solver may use `x2 + y^k` as a conjugating frame and returns to the original orientation.
+- Implemented IDA* FB search with two exact pair-PDB lower bounds, full face-move search, move ordering, timeout/max-node/max-depth limits, and post-solution verification.
+- Registered Roux remains available through the solver registry/API; API test now expects `roux` to return the verified `First Block` phase instead of `SOLVER_UNAVAILABLE`.
+- Added `tests/test_roux.py` covering solved state, short scrambles, non-full-solve semantics, and depth-limit behavior.
+- Current Roux status: **FB implemented; SB/CMLL/LSE still pending**. The solver intentionally does not claim a full-cube Roux solution yet.
+- Verification after the white-bottom correction: `tests/test_roux.py` = **5 passed in 0.55s**; combined `tests/test_roux.py tests/test_api.py` = **12 passed in 46.17s**.
+- Representative outputs now use `x2 + y^k ... y^-k + x2`, returning to the original cube orientation while allowing side-frame selection.
+- Next action: benchmark FB on longer random/legal scrambles and tune the search/heuristic before starting Second Block (SB).
+
+## 2026-10-02 - M6 Roux FB rotation/side contract corrected
+
+- User-defined Roux contract is now explicit: **rotations are allowed only as a setup prefix before FB solving**; no rotation may appear after the first face turn or inside the FB solution.
+- Removed the previous rotation-conjugation suffix (`... y^-k x2`). The returned sequence is now `setup rotations + face turns` only.
+- FB canonical target is the **left** Roux block: corners `DLF/DBL` and edges `DL/FL/BL`, with the white stickers forming the block bottom in the selected setup frame.
+- `first_block_solved()` validation was corrected to validate the final cube directly against the selected setup-frame target instead of applying the setup rotation a second time.
+- Added regression assertions that every Roux solution keeps all rotations in a contiguous prefix and metadata explicitly records `rotation_policy=setup-prefix-only` and `fb_side=left`.
+
+**Verification:**
+- `tests/test_roux.py`: **5 passed in 8.88s**.
+- No Git commit was made.
+
+**NEXT ACTION:**
+- Benchmark the corrected left-side/setup-only FB contract on longer legal scrambles, measuring FB success, depth, runtime, B/D usage, setup rotation distribution, and whether the chosen frame consistently keeps the block on the left.
+
+### 2026-10-02 - M6 Roux FB benchmark #1
+
+- Ran a deterministic benchmark of **10 legal 25-move scrambles** using seed `20261002`.
+- Configuration: `fb_max_depth=14`, `fb_max_nodes=2,000,000`, `fb_timeout_seconds=10` per frame search.
+- Result: **10/10 FB successes**, with all outputs satisfying the setup-prefix-only rotation contract and `fb_side=left`.
+- Total returned solution length: **90 HTM moves including setup rotations**; average **9.0**, range **8-10**.
+- B usage: **4 total / 0.4 average** per case; 6/10 cases used no B.
+- D usage: **12 total / 1.2 average** per case.
+- Selected setup frames: frame `0` = 3 cases, frame `1` = 6 cases, frame `3` = 1 case, frame `2` = 0 cases.
+- All setup prefixes were `x2` optionally followed by one `y`-rotation; no rotation appeared after a face turn.
+- Search nodes for the selected candidate ranged from **3,921 to 498,370**.
+- Wall-clock runtime ranged from **0.888s to 14.653s**, average about **8.74s**. Runtime can exceed the 10s per-frame timeout because the solver may try all four setup frames before selecting the best candidate.
+- The benchmark exposed no correctness failure. It does show substantial search-time variance and a non-trivial B/D rate, so FB search ergonomics/performance still need tuning before SB.
+- Temporary benchmark script was removed after the run; no benchmark artifact was left in the project.
+
+**NEXT ACTION:**
+- Roux FB scoring is now **HTM-neutral across move types**: B and D are not penalized, because a short B/D sequence can be ergonomically useful when building the block.
+- Added Roux `r/r2/r'` and `M/M2/M'` to the FB search move set. These are treated as normal one-move HTM turns, not rotations; `x/y/z` remain setup-only.
+- Re-ran a deterministic 5-scramble benchmark with `fb_max_depth=12`, `fb_max_nodes=1,000,000`, `fb_timeout_seconds=5` per frame: **5/5 success**. Outputs included `M'`, `M2`, and `r`, confirming the new move classes are executable and can be selected naturally.
+- Benchmark outputs were **6-8 HTM including setup**; one case reached 6 HTM and two cases used M/r moves. No correctness regression was observed.
+- Next: run a broader FB benchmark comparing move-type usage and runtime after widening the move set; do not introduce B/D/r/M penalties unless benchmark evidence shows a concrete search problem.
+
+### 2026-10-02 - M6 Roux FB recognition/ranking planner implemented and benchmarked
+
+- Added a staged FB recognition layer in `roux.py`:
+  1. rank the two possible `1x1x3` pair/line starts using the existing pair-PDB heuristic;
+  2. construct that line;
+  3. extend it to the `1x2x2` square by solving DL;
+  4. finish the remaining pair to reach the full 1x2x3 FB.
+- The staged search explicitly allows normal U moves, wide-U `u/u2/u'`, and Roux extra moves (`r/r2/r'`, `M/M2/M'`). These are construction moves; only `x/y/z` remain setup rotations.
+- The staged result is used as an upper bound/valid fallback, while the exact full-FB IDA* search is allowed to refine it. This makes the recognition planner the main FB planning path without sacrificing the existing exact correctness search.
+
+**Controlled benchmark:**
+- Same deterministic seed `20261002`, same 5 legal 20-move scrambles used for the staged-vs-current comparison.
+- Pre-integration current solver: FB lengths **8, 7, 7, 7, 7**; runtimes **5.09s, 5.49s, 2.03s, 1.44s, 2.76s**.
+- Staged-only recognition planner: lengths **12, 9, 12, 11, 11**; runtimes **0.84s, 0.79s, 0.49s, 0.69s, 1.60s**. This showed that the first recognition/ranking heuristic alone is too conservative to replace exact refinement.
+- Integrated planner after replacement: lengths remained **8, 7, 7, 7, 7**, all **5/5 verified**. All selected outputs used the exact-refinement path; staged candidates served as bounds/fallbacks rather than worsening the final solution.
+- Integrated runtimes were **6.03s, 6.80s, 2.47s, 2.12s, 5.11s** on the same sample, so the new recognition layer currently adds search overhead without a measured move-count gain.
+- `tests/test_roux.py`: **5 passed in 3.96s** after integration. No Git commit was made.
+
+**NEXT ACTION:**
+- Optimize the recognition/ranking layer so it predicts the good FB construction strongly enough to reduce exact-search work, especially by scoring the post-line/post-square state rather than ranking the first pair from the initial state alone. Benchmark move count **and** exact-search nodes/runtime before changing the construction rules again.
+
+### 2026-10-02 - Roux FB planning note: allow wide-U and extra moves
+
+- User clarified that **wide-U moves `u/u2/u'` (Uw/Uw2/Uw') may be intentionally used to pair/extend Roux FB pieces** when they produce a short construction. This does **not** mean ordinary `U/U2/U'` should automatically receive the same treatment.
+- The FB planner may also use the solver's supported **extra moves** where they produce a shorter/easier block construction. These are normal construction moves, not rotations.
+- Therefore the staged FB planner must not reject `u/u2/u'` or supported extra moves simply because they temporarily move pieces outside the final FB positions. They are valid when the resulting stage is structurally useful and the total stage sequence remains short.
+- This applies to the planned recognition order: **easy 1x1x3 -> easy 1x2x2 -> DL already paired with center -> DL easy to insert**.
+- Stage ranking should prefer structural ease first, then short HTM construction; do not add a blanket wide-U/extra-move penalty.
+
+**NEXT ACTION:**
+- Implement the staged FB recognition/planning layer with U/U2/U' available for short pair-building, then benchmark it against the current full-FB IDA* planner before replacing the existing path.
+
+### 2026-10-03 - M6 Roux Second Block implemented with FB→SB lookahead
+
+**Requirement:**
+- Continue M6 by implementing **Second Block (SB)**.
+- Every phase result must be structurally verified, and the state after SB must also be passed through a full-cube solver as an independent correctness oracle.
+
+**Implementation:**
+- Added exact Roux SB goal for the right 1x2x3 block: corners `DFR/DBR`, edges `DR/FR/BR`.
+- SB construction move set is `U/U2/U'`, `R/R2/R'`, `M/M2/M'`, `r/r2/r'`; rotations remain setup-prefix-only.
+- Replaced one-sided SB IDA* with an exact bidirectional BFS over the Roux SB subgroup. The search reconstructs shortest HTM solutions within the configured depth bound.
+- Added `second_block_solved()` verification for the complete two-block state.
+- Added **FB→SB lookahead**: the solver no longer blindly selects the shortest FB candidate. It evaluates SB continuation for the available exact/staged FB candidates and selects a candidate with a valid SB continuation, then minimizes combined FB+SB HTM.
+- This addresses an important architectural issue: an FB can be locally valid but leave a state that is not reachable by the restricted SB subgroup. SB feasibility is now part of FB candidate selection.
+- Added Kociemba full-solve verification after SB. Because the Kociemba engine does not track cube centers, the post-SB state is first normalized back through the inverse setup frame (`x2 + y^k`) before invoking Kociemba.
+- Fixed `first_block_solved()` so the fully solved cube is recognized as a valid FB state.
+
+**Verification:**
+- `tests/test_roux.py`: **5 passed in 100.14s**.
+- Focused solved/full-solve verifier tests: **2 passed in 26.12s**.
+- The full project `pytest -q` command could not collect `tests/test_api.py` because the current invocation environment reported `ModuleNotFoundError: No module named 'api'`; this is an environment/import-path issue, not a Roux test failure.
+- No Git commit was made.
+
+**Benchmark/diagnostic findings:**
+- The initial SB IDA* baseline timed out around **667k nodes / 10s** on a deterministic 20-move case even after reducing the move set to `U/R/M`.
+- Exact bidirectional SB search is substantially more controlled, but the initial FB candidate could still be outside the reachable SB subgroup; FB→SB lookahead is therefore necessary before move-count optimization.
+- External Roux references confirm the standard SB subgroup is `U/R/r/M`, with **DR-first** as the dominant practical construction strategy and square/pair alternatives as lookahead opportunities. [Source: Roux Tutorial / Roux Reader]
+
+**Current M6 status:**
+- FB: implemented + verified.
+- SB: implemented + verified, with full-cube oracle verification.
+- CMLL: pending.
+- LSE: pending.
+
+**NEXT ACTION:**
+- Optimize SB recognition rather than increasing brute-force depth: implement a **DR-first / square-first staged SB planner**, rank the two possible remaining pairs after DR, and use that staged solution as an upper bound for exact SB refinement. Benchmark `FB`, `SB`, combined `F2B`, search nodes, runtime, and post-SB full-solve length on a deterministic random set.
+
+### 2026-10-03 - M6 SB recognition/ranking planner benchmarked
+
+**Implementation:**
+- Added `_StagedSBSearch` for SB recognition-first planning:
+  1. rank the two DR-first constructions (`DFR+DR` or `DBR+DR`);
+  2. extend the selected DR pair to the adjacent FR/BR square;
+  3. finish the opposite corner+edge pair.
+- The staged planner uses only the Roux SB subgroup `U/R/r/M` and keeps the total configured SB depth bound.
+- Staged SB is now used as an **upper bound** for exact bidirectional SB refinement. Exact search is limited to `upper_bound - 1`, so it runs only when a shorter SB may exist; the staged solution remains a valid fallback.
+- Added SB planner metadata: `sb_planner`, `sb_exact_refinement`, and `sb_staged_nodes`.
+- Increased only the internal staged DR/square recognition allowance to 7 while keeping the solver default `sb_max_depth=12`; a diagnostic depth-14 run showed substantially higher runtime and was not adopted as the default.
+
+**Center-aware full-solve oracle:**
+- Roux SB legitimately uses `M/r`, which changes the M-slice centers. The old fixed-center Kociemba adapter can reject these states as impossible even though the Roux construction is valid.
+- Added center tracking through `frame -> construction -> inverse frame`.
+- The full-solve oracle finds the required `M^k` center normalization (`k=0..3`), applies it to the post-SB state, then runs the Kociemba solver and verifies the normalized state independently.
+- This preserves support for `M/r` instead of removing them from the SB move set.
+
+**Deterministic isolated SB benchmark:**
+- Seed: `20261003`; 5 canonical SB states generated from the Roux `x2` frame with 10 random `U/R/r/M` construction moves.
+- All **5/5 staged solutions verified**.
+- Staged lengths: **6, 8, 4, 11, 11 HTM**.
+- Exact lengths: **8, 9, 7, 9, 7 HTM**.
+- Staged search nodes: **589, 1552, 570, 807, 2376**.
+- Exact search nodes: **62,170, 63,831, 62,104, 64,419, 62,095**.
+- Staged runtime: **0.007–0.028s**; exact runtime: **1.352–1.448s**.
+- Post-SB full-solve oracle lengths: **14, 22, 10, 16, 14**; all **5/5 verified**.
+- Therefore staged recognition reduces SB search cost by roughly two orders of magnitude on this controlled sample. When staged is longer than exact, the integrated planner can still refine it; when staged is shorter, exact refinement is skipped.
+
+**End-to-end diagnostic:**
+- A separate 5-scramble, 20-move random test with the full Roux solver at `sb_max_depth=12` solved **2/5** cases; 3 cases exhausted the current SB search budget. A diagnostic `sb_max_depth=14` run recovered one hard case but took about **94s**, so increasing brute-force depth is not adopted as the optimization direction.
+- Permanent Roux regression after these changes: **5 passed in 49.53s**.
+- Temporary benchmark scripts were removed.
+- No Git commit was made.
+
+**Current M6 status:**
+- FB: implemented + verified.
+- SB: implemented + verified, including staged recognition and center-aware full-solve oracle.
+- CMLL: pending.
+- LSE: pending.
+
+**Decision / constraint:**
+- In Roux SB, **M/r moves must remain freely available** during construction and search. Do not penalize, restrict, or avoid M/r merely because they alter center permutation. At this stage of the Roux method, center orientation/permutation is not a constraint on the SB construction; the existing center-aware full-solve oracle handles normalization only when an independent full-cube verification is needed.
+
+**NEXT ACTION:**
+- Run a larger deterministic SB benchmark specifically measuring **post-DR ranking quality vs. exact-refinement frequency**, and inspect cases where staged remains 2+ HTM above exact. If ranking does not reduce the gap, move on to the next Roux phase rather than adding brute-force depth. Keep **M/r fully available**.
+
+### 2026-10-03 - M6 SB post-DR recognition ranking refined
+
+**Implementation:**
+- Reworked _StagedSBSearch.solve() so the two DR constructions are no longer ranked only from the initial cube.
+- Each DR candidate is solved first; the resulting **post-DR state** is then scored using the remaining square + opposite-pair heuristics.
+- The lower-scoring post-DR construction is attempted first, while the alternate construction remains available as fallback.
+- Square construction now preserves the fixed DR edge explicitly, and the remaining pair is evaluated from the actual **post-square state** before its final stage.
+- Added an admissible lower-bound check in the integrated FB→SB flow: if the staged SB solution already equals the SB pair lower bound, exact bidirectional refinement is skipped because it cannot improve the HTM length.
+- U/R/r/M remains the complete SB construction set; **no M/r restriction or center penalty was introduced**.
+
+**Verification:**
+- pytest tests/test_roux.py -q: **5 passed in 48.56s**.
+
+**Benchmark:**
+- Deterministic isolated SB sample, seed 20261003, 5 states generated from the x2 frame using 10 random U/R/r/M moves.
+- Recognition-ranked staged results: **7, 6, 7, 4, 3 HTM**; all **5/5 verified**.
+- Staged nodes: **1553, 5714, 713, 332, 181**; runtimes **0.0028–0.0694s**.
+- Exact results on the same states: **9, 4, 8, 6, 7 HTM**; exact runtime **1.2995–1.3638s** and approximately **62k–63k nodes/case**.
+- On this sample, the new lower-bound shortcut did **not** skip any exact refinement call because all staged solutions were above the initial admissible lower bound. Therefore it is retained as a safe optimization, but there is not yet evidence that it materially reduces exact calls.
+- The new ranking is correctness-safe and keeps staged planning cheap; a larger benchmark is still needed before claiming a move-count or exact-call improvement over the previous planner.
+
+**Current M6 status:**
+- FB: implemented + verified.
+- SB: implemented + verified, with post-DR/post-square recognition and center-aware full-solve oracle.
+- CMLL: pending.
+- LSE: pending.
+
+**Git:** No commit made; commit only when explicitly requested.
+
+### 2026-10-03 - M6 SB benchmark exposed exact-search/recognition correctness issues
+
+**Investigation:**
+- Ran the planned larger deterministic isolated SB benchmark: seed `20261003`, 20 generated states using 12 random `U/R/r/M` moves.
+- Before trusting the ranking numbers, found that the bidirectional SB search was keyed by the complete CubeState even though SB is a partial-state goal. This could miss valid SB solutions whose non-SB pieces differ from the canonical target.
+- Reworked `_SecondBlockSearch` to use a projection containing the positions/orientations of the five SB target cubies, and added a regression proving a one-move partial-goal case returns the exact `R'` solution.
+- Also found that staged SB stages did not explicitly preserve the already-built DR/square state. Added preservation goals to stage 2 and stage 3 so the staged planner cannot claim a continuation that destroys an earlier block component.
+
+**Verification:**
+- Roux suite after the fixes: **6 passed in 21.94s**.
+- Roux + API: **13 passed in 61.45s** with `PYTHONPATH=.`.
+- Full suite: **108 passed, 1 failed**. The remaining failure is an unrelated pre-existing `tests/test_cfop.py::test_f2l_search_allows_r_and_l_in_same_pair` NameError referencing an undefined `result`; `tests/test_cfop.py` has no working-tree diff.
+
+**Diagnostic benchmark:**
+- The larger SB sample completed **18/20** staged/exact comparisons; 2 staged searches exhausted their current 2s staged budget.
+- After the fixes, staged vs exact gaps over completed cases were mixed: average staged-minus-exact gap **+0.61 HTM**, with **5/18** staged shorter, **7/18** equal, and **5/18** at least 2 HTM longer.
+- However, a deterministic diagnostic still found a staged 1-move candidate while the current bidirectional exact search returned 3 moves for the same fixed SB goal. Therefore the current exact-search implementation is **not yet trustworthy as an optimality oracle**, despite the partial-projection fix.
+- Consequently, the benchmark must **not** be used yet to decide whether the post-DR ranking is good enough or whether to move to CMLL.
+- **M/r remains fully available**; no restriction or center penalty was introduced.
+
+**Decision:**
+- Stop SB ranking optimization here. Do not increase brute-force depth and do not move to CMLL yet.
+- First make the SB exact search demonstrably correct on fixed-frame partial goals, then rerun the benchmark and only then decide whether the staged ranking is worth further refinement.
+
+**NEXT ACTION:**
+- Diagnose and correct the remaining discrepancy between staged SB and exact bidirectional SB on a fixed target, starting from the deterministic 1-HTM counterexample. Add a regression that requires exact search to return that shortest result, then rerun the larger benchmark.
+
+### 2026-10-03 - M6 SB exact-search discrepancy resolved
+
+**Root causes found:**
+- The staged planner used the frame-agnostic `second_block_solved()` predicate for a planner that is called with a fixed FB frame. This allowed a candidate that solved another y-frame to appear artificially short. Staged SB now validates against its fixed `target`.
+- The SB projection was incorrectly treating the numeric goal positions `(4, 7)` / `(4, 8, 11)` as cubie IDs. With the `x2` Roux frame, the actual target cubie IDs are `target.cp[pos]` / `target.ep[pos]`. The projection now derives the tracked cubies from the target frame itself.
+- The bidirectional depth split used `floor(max_depth / 2)` on the goal side, so an even depth budget of 12 could only combine to 11. The split now uses `(max_depth + 1) // 2`, allowing 6+6 at depth 12.
+
+**Verification:**
+- Added an exact-search regression covering all 12 allowed one-move `U/R/M/r` cases. It verifies shortest length and final fixed-target goal; equivalent one-move solutions are accepted rather than requiring a specific notation.
+- Roux suite after the fixes: **7 passed in 21.42s** before the final depth-split change; the modified files compile cleanly after the final change.
+- Deterministic fixed-target SB benchmark: seed `20261003`, 20 states from 12 random `U/R/M/r` moves. Fixed-target staged planner succeeded on **18/20**; exact refinement found shorter solutions in **7** cases with gaps **4, 1, 4, 1, 3, 5, 2 HTM**. The full exact search subsequently solved all benchmark cases within the configured depth/time budget, and every returned solution was verified against the fixed SB goal.
+- The benchmark exposed and then eliminated the previous false `1 HTM staged vs 3 HTM exact` discrepancy; it was a target-frame/projection bug, not evidence that the exact search was suboptimal.
+- **M/r remains fully available**; no center penalty/restriction was introduced.
+
+**Current M6 status:**
+- FB: implemented + verified.
+- SB: **complete for the current M6 scope** — fixed-frame staged recognition + exact bidirectional refinement + deterministic benchmark verification + full-cube center-aware oracle.
+- CMLL: pending.
+- LSE: pending.
+
+**Decision:**
+- Stop further SB brute-force/ranking optimization for now. Move to CMLL next. Preserve the current exact SB implementation as the correctness fallback.
+- No Git commit; commit only when explicitly requested.
+
+### 2026-10-03 - M6 CMLL implemented and verified
+
+**Implementation:**
+- Added `data/cmll_algorithms.json` as the local CMLL algorithm database with **42 cases**, grouped as O/H/Pi/T/U/As/L/S.
+- Algorithms were selected from the Kian/Roux CMLL references; the implementation does not search for new CMLL algorithms.
+- Added `_CMLLDatabase` recognition based only on the four CMLL corners. Case signatures are generated from the inverse of each stored algorithm, so recognition is tied directly to the local algorithm set rather than to hard-coded colour patterns.
+- U rotations are treated as AUF/redefinition before the algorithm. All four AUF orientations are accepted.
+- Recognition is frame-aware: it tracks the actual four target U-layer cubies from the active Roux `x2 + y^k` frame instead of assuming cubie IDs `0..3`.
+- Added an explicit solved/AUF-equivalent fast path so CMLL can return only the necessary AUF when corners are already solved.
+- Integrated CMLL into `RouxSolver`: returned solution now contains FB -> SB -> CMLL phases, with `cmll_case` / `cmll_family` metadata.
+
+**Verification:**
+- Local DB contains exactly **42 unique AUF-equivalence classes**.
+- All **42/42** synthetic CMLL cases recognize and solve correctly.
+- All **4 AUF orientations × 42 cases = 168** recognition/execution combinations pass.
+- CMLL algorithms preserve the FB/SB corner and edge targets in the regression suite.
+- End-to-end Roux suite: **10 passed**.
+- Full project suite via `python -m pytest tests -q`: **112 passed, 1 failed**. The sole failure is the same pre-existing unrelated `tests/test_cfop.py::test_f2l_search_allows_r_and_l_in_same_pair` `NameError` (`result` undefined); no CFOP test file was changed in this CMLL work.
+- No Git commit.
+
+**Current M6 status:**
+- FB: complete.
+- SB: complete.
+- CMLL: **complete for the requested scope — 42-case recognition + AUF + local algorithm DB; no algorithm search.**
+- LSE: pending.
+
+**NEXT ACTION:**
+- Implement LSE. Preserve the same principle: use Roux's existing M/U method rather than brute-forcing an arbitrary full-cube solution.

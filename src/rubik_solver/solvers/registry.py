@@ -3,6 +3,7 @@ from __future__ import annotations
 from .base import Solver
 from .cfop import CFOPSolver
 from .kociemba import KociembaSolver
+from .roux import RouxSolver
 
 
 class SolverUnavailableError(RuntimeError):
@@ -12,6 +13,7 @@ class SolverUnavailableError(RuntimeError):
 _SOLVERS: dict[str, type[Solver]] = {
     "kociemba": KociembaSolver,
     "cfop": CFOPSolver,
+    "roux": RouxSolver,
 }
 
 
