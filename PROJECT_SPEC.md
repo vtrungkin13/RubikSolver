@@ -613,6 +613,7 @@ Core hoàn thành khi:
 - Trạng thái thực tế của Git và test được ưu tiên hơn thông tin cũ trong `WORKLOG.md` nếu có mâu thuẫn.
 - Khi hoàn thành milestone lớn, phải cập nhật checkpoint và commit khi working tree ổn định.
 - Không cần chờ user nhắc việc cập nhật `WORKLOG.md`; đây là quy ước mặc định của project.
+- Không tự động commit thay đổi. Chỉ được tạo commit khi user yêu cầu rõ ràng.
 
 ### Tài liệu nguồn sự thật
 
@@ -634,6 +635,70 @@ Giữ Python làm ngôn ngữ chính cho solver:
     HTML/CSS/JavaScript
 
 Không chuyển toàn bộ project sang JavaScript.
+
+### Solver philosophy — learning-oriented human solve
+
+RubikSolver không chỉ nhằm tìm một sequence hợp lệ hoặc ngắn nhất. Một mục tiêu
+quan trọng của project là giúp cuber **học cách giải hay** bằng cách quan sát,
+so sánh và phân tích solution do solver tạo ra.
+
+Vì vậy, khi một method có thể được triển khai theo nhiều cách, ưu tiên kiến
+trúc có thể giải thích được và gần với tư duy human solve:
+
+- Solution phải giữ phase boundaries rõ ràng để cuber biết solver đang giải gì.
+- Solver nên nhận diện các cơ hội có lợi cho human solving thay vì chỉ tối ưu
+  một objective toàn cục.
+- Search/optimization được dùng để tìm một continuation tốt trong phase, nhưng
+  không được làm mất ý nghĩa học tập của phase đó.
+- Metadata nên giải thích strategy/case/opportunity khi có thể, để UI sau này
+  có thể trình bày **vì sao** solver chọn cách giải đó.
+- Cần phân biệt rõ `human-style`, `optimized` và `fallback/oracle search`; không
+  gọi một solution là human-style chỉ vì nó giải đúng phase.
+
+Roux là reference implementation đầu tiên cho philosophy này. Kiến trúc tương
+tự phải được tái sử dụng khi tiếp tục xây dựng CFOP đang pending, đặc biệt cho
+Cross/F2L lookahead, pair selection, case recognition và giải thích quyết định.
+
+### Roux phase-boundary decision
+
+Roux FB và SB phải được xử lý như hai phase độc lập để giữ planner gần với
+cách human solve:
+
+- FB chỉ tối ưu theo mục tiêu FB; không dùng SB continuation/lookahead để
+  chấm điểm hoặc chọn FB.
+- Hoàn tất và chọn FB tối ưu trước.
+- Chỉ sau khi FB được chốt mới bắt đầu tìm kiếm SB từ state sau FB.
+- Không quay lại đổi FB chỉ vì một SB continuation khác có vẻ thuận lợi hơn.
+
+### Roux human-style SB strategy
+
+Sau khi FB đã được chốt, SB là một phase độc lập nhưng có thể dùng lookahead
+**bên trong SB** để mô phỏng tư duy của cuber:
+
+1. Nhận diện `FREE_SQUARE` / `FREE_PAIR` hoặc cơ hội dễ khai thác nếu state đã
+   chứa sẵn một phần SB.
+2. Nếu không có cơ hội rõ ràng, dùng DR-first nhưng không greedy theo DR ngắn
+   nhất; phải xét ảnh hưởng của DR lên hai pair còn lại và thứ tự pair tiếp theo.
+3. Chỉ khi human-style planner không tìm được continuation hợp lệ mới dùng
+   direct SB search như **emergency/oracle fallback**.
+4. Direct fallback không được quay ngược để thay thế một human-style plan hợp
+   lệ chỉ vì nó ngắn hơn. Nếu fallback được dùng, metadata phải nói rõ đây là
+   fallback để phục vụ học tập/debugging.
+
+Direct SB hiện có mục tiêu correctness và oracle/debugging hơn là strategy chính.
+Mặc định fallback được phép tìm tới 14 HTM moves với node limit riêng; giới hạn
+thời gian vẫn được áp dụng. Human-style SB planner và direct fallback cùng tôn
+trọng resource budget do caller cấu hình; không có cap thời gian nội bộ thấp hơn
+budget đó.
+
+### Future CFOP learning-oriented design
+
+Khi tiếp tục M5/CFOP, không reset philosophy về một shortest-path solver. CFOP
+cần giữ phase structure `Cross → F2L → OLL → PLL` và hướng tới các quyết định có
+giá trị học tập như cross quality, F2L pair recognition/order, lookahead,
+free-pair exploitation và ergonomics. Search có thể làm oracle/benchmark, nhưng
+human-style solution và optimized solution phải là hai mục tiêu được phân biệt
+trong model/metadata.
 
 Thứ tự triển khai:
 

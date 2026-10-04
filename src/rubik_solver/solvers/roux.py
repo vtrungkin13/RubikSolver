@@ -650,9 +650,51 @@ def _solve_ulur_intuitive(cube: CubeState, target: CubeState) -> tuple[str, ...]
 
 
 @dataclass(slots=True)
+class _SBOpportunityDetector:
+    """Recognize already-useful SB material before starting DR-first.
+
+    This is intentionally recognition, not a global optimizer. The detector
+    looks for exact human-friendly structures in the fixed post-FB state so
+    the planner can exploit a free pair/square instead of destroying it to
+    satisfy a generic DR-first script.
+    """
+
+    target: CubeState
+
+    def detect(self, cube: CubeState) -> dict[str, object]:
+        free_squares: list[str] = []
+        if _pair_goal(cube, self.target, 4, 4) and _edge_goal(cube, self.target, 8):
+            free_squares.append("FR")
+        if _pair_goal(cube, self.target, 7, 4) and _edge_goal(cube, self.target, 11):
+            free_squares.append("BR")
+
+        free_pairs: list[str] = []
+        if _pair_goal(cube, self.target, 4, 8):
+            free_pairs.append("FR")
+        if _pair_goal(cube, self.target, 7, 11):
+            free_pairs.append("BR")
+        if _pair_goal(cube, self.target, 4, 4):
+            free_pairs.append("DR")
+
+        if free_squares:
+            return {
+                "strategy": "FREE_SQUARE",
+                "squares": tuple(free_squares),
+                "pairs": tuple(free_pairs),
+            }
+        if free_pairs:
+            return {
+                "strategy": "FREE_PAIR",
+                "squares": (),
+                "pairs": tuple(free_pairs),
+            }
+        return {"strategy": "DR_FIRST", "squares": (), "pairs": ()}
+
+
+@dataclass(slots=True)
 class _SecondBlockSearch:
     target: CubeState
-    max_depth: int = 12
+    max_depth: int = 14
     max_nodes: int | None = 2_000_000
     timeout_seconds: float | None = 10.0
     nodes: int = field(init=False, default=0)
@@ -790,6 +832,12 @@ class _StagedSBSearch:
     nodes: int = field(init=False, default=0)
     started: float = field(init=False, default=0.0)
     path: list[str] = field(init=False, default_factory=list)
+    strategy: str = field(init=False, default="DR_FIRST")
+    opportunity: dict[str, object] = field(init=False, default_factory=dict)
+    dr_candidate_limit: int = 3
+    dr_candidates_found: int = field(init=False, default=0)
+    selected_pair_order: str | None = field(init=False, default=None)
+    planner_score: tuple | None = field(init=False, default=None)
 
     def __post_init__(self) -> None:
         self.started = monotonic()
@@ -799,6 +847,15 @@ class _StagedSBSearch:
             raise RuntimeError("Roux staged SB search node limit exceeded")
         if self.timeout_seconds is not None and monotonic() - self.started >= self.timeout_seconds:
             raise TimeoutError("Roux staged SB search timeout exceeded")
+
+    def _goal(self, cube: CubeState) -> bool:
+        return all(
+            cube.cp[pos] == self.target.cp[pos] and cube.co[pos] == self.target.co[pos]
+            for pos in _SB_CORNER_GOALS
+        ) and all(
+            cube.ep[pos] == self.target.ep[pos] and cube.eo[pos] == self.target.eo[pos]
+            for pos in _SB_EDGE_GOALS
+        ) and _u_corners_on_u_layer(cube, self.target)
 
     def _heuristic(self, cube: CubeState, goals: tuple[tuple[int, int], ...]) -> int:
         return max(
@@ -854,6 +911,124 @@ class _StagedSBSearch:
                 return result
         raise RuntimeError("Roux staged SB stage failed")
 
+    def _solve_stage_candidates(
+        self,
+        cube: CubeState,
+        goals: tuple[tuple[int, int], ...],
+        *,
+        max_stage_depth: int,
+        limit: int,
+    ) -> list[tuple[str, ...]]:
+        """Return a small set of shortest stage candidates.
+
+        This is intentionally bounded. Phase 1 of the human-style SB planner
+        must explore alternatives without turning into an unrestricted search.
+        Candidates are collected from the first depth thresholds that produce
+        solutions, then capped by ``limit``.
+        """
+        if limit <= 0:
+            return []
+        heuristic = self._heuristic(cube, goals)
+        results: list[tuple[str, ...]] = []
+        seen: set[tuple[str, ...]] = set()
+
+        def goal(state: CubeState) -> bool:
+            return all(
+                state.cp[corner] == self.target.cp[corner]
+                and state.co[corner] == self.target.co[corner]
+                and state.ep[edge] == self.target.ep[edge]
+                and state.eo[edge] == self.target.eo[edge]
+                for corner, edge in goals
+            )
+
+        def collect(state, depth, threshold, previous_face) -> None:
+            if len(results) >= limit:
+                return
+            self.nodes += 1
+            self._check_limits()
+            if depth + self._heuristic(state, goals) > threshold:
+                return
+            if goal(state):
+                candidate = tuple(self.path)
+                if candidate not in seen:
+                    seen.add(candidate)
+                    results.append(candidate)
+                return
+            if depth == threshold:
+                return
+            for move in _SB_MOVES:
+                face = move[0]
+                if previous_face is not None and face == previous_face:
+                    continue
+                self.path.append(move)
+                collect(apply_move(state, move), depth + 1, threshold, face)
+                self.path.pop()
+                if len(results) >= limit:
+                    return
+
+        for threshold in range(heuristic, max_stage_depth + 1):
+            collect(cube, 0, threshold, None)
+            if len(results) >= limit:
+                break
+        return results
+
+    def _pair_order_options(
+        self,
+        dr_state: CubeState,
+        dr_moves: tuple[str, ...],
+        dr_goal: tuple[int, int],
+        *,
+        remaining_depth: int,
+    ) -> list[dict[str, object]]:
+        """Phase 2: evaluate both natural pair orders after a fixed DR.
+
+        The first pair is actually solved for the lookahead. The resulting
+        state is then scored for the remaining pair. This avoids the classic
+        mistake of choosing the shortest DR while ignoring what it leaves
+        behind.
+        """
+        orders = (
+            ("FR_FIRST", (4, 8), (7, 11)),
+            ("BR_FIRST", (7, 11), (4, 8)),
+        )
+        evaluated: list[dict[str, object]] = []
+        for name, first_pair, final_pair in orders:
+            try:
+                first_moves = self._solve_stage(
+                    dr_state,
+                    (first_pair,),
+                    include_edges=(first_pair[1],),
+                    preserve_goals=(dr_goal,),
+                    max_stage_depth=max(0, remaining_depth),
+                )
+            except (RuntimeError, TimeoutError):
+                continue
+            after_first = apply_moves(dr_state, first_moves)
+            final_heuristic = self._heuristic(after_first, (final_pair,))
+            opportunity = _SBOpportunityDetector(self.target).detect(after_first)
+            opportunity_bonus = 0
+            if opportunity["strategy"] == "FREE_SQUARE":
+                opportunity_bonus = -2
+            elif opportunity["strategy"] == "FREE_PAIR":
+                opportunity_bonus = -1
+            score = (
+                len(dr_moves) + len(first_moves) + final_heuristic + opportunity_bonus,
+                final_heuristic,
+                len(first_moves),
+                len(dr_moves),
+            )
+            evaluated.append({
+                "order": name,
+                "first_pair": first_pair,
+                "final_pair": final_pair,
+                "first_moves": first_moves,
+                "after_first": after_first,
+                "final_heuristic": final_heuristic,
+                "opportunity": opportunity,
+                "score": score,
+            })
+        return evaluated
+
     def _dfs(self, cube, depth, threshold, previous_face, goal, goals):
         self.nodes += 1
         self._check_limits()
@@ -889,93 +1064,188 @@ class _StagedSBSearch:
             cube.ep[pos] == self.target.ep[pos] and cube.eo[pos] == self.target.eo[pos]
             for pos in _SB_EDGE_GOALS
         ):
+            self.strategy = "ALREADY_SOLVED"
+            self.opportunity = {"strategy": self.strategy, "squares": (), "pairs": ()}
             return ()
 
-        # There are two natural DR-first constructions:
-        #   A: DFR+DR -> FR square -> DBR+BR
-        #   B: DBR+DR -> BR square -> DFR+FR
-        #
-        # Do recognition on the *actual post-DR state*, not the initial cube.
-        # The initial heuristic cannot see how the chosen DR solution changes
-        # the remaining pair/square relationship.
-        plans = (
-            ((4, 4), (4, 8), (7, 11)),
-            ((7, 4), (7, 11), (4, 8)),
-        )
+        detector = _SBOpportunityDetector(self.target)
+        self.opportunity = detector.detect(cube)
+        opportunity_result = self._solve_opportunity(cube)
+        if opportunity_result is not None:
+            return opportunity_result
 
-        dr_candidates: list[tuple[int, tuple[int, int], tuple[int, int], tuple[str, ...], CubeState]] = []
-        for dr, square, final_pair in plans:
+        self.strategy = "DR_FIRST"
+
+        # Phase 1: generate at most three DR candidates across both natural
+        # constructions. We deliberately keep this small so alternatives are
+        # considered without turning SB into a broad global search.
+        dr_specs = ((4, 4), (7, 4))
+        dr_candidates: list[tuple[tuple, tuple[int, int], tuple[str, ...], CubeState]] = []
+        per_spec_limit = self.dr_candidate_limit
+        for dr in dr_specs:
             try:
-                dr_moves = self._solve_stage(
+                paths = self._solve_stage_candidates(
                     cube,
                     (dr,),
                     max_stage_depth=min(7, self.max_depth),
+                    limit=per_spec_limit,
                 )
             except (RuntimeError, TimeoutError):
-                continue
-            dr_state = apply_moves(cube, dr_moves)
-            # Recognition score after DR: prefer the square/final-pair route
-            # whose actual post-DR state is closer to completion.
-            score = self._heuristic(dr_state, (square,)) + self._heuristic(dr_state, (final_pair,))
-            dr_candidates.append((score, square, final_pair, dr_moves, dr_state))
-
-        dr_candidates.sort(key=lambda item: (item[0], len(item[3])))
-        best: tuple[str, ...] | None = None
-
-        for _, square, final_pair, dr_moves, dr_state in dr_candidates:
-            moves: list[str] = list(dr_moves)
-            state = dr_state
-            try:
-                # Stage 2: recognize/rank the square from the post-DR state.
-                # Only the adjacent FR/BR edge is needed to extend the fixed DR.
-                stage = self._solve_stage(
-                    state,
-                    (square,),
-                    # Preserve/recognize the edge belonging to the selected
-                    # square. Plan A uses FR (edge 8), while plan B uses BR
-                    # (edge 11). Hard-coding FR here made the DBR->BR route
-                    # impossible unless FR happened to be solved already.
-                    include_edges=(square[1],),
-                    preserve_goals=(dr,),
-                    max_stage_depth=min(7, self.max_depth - len(moves)),
+                paths = []
+            for dr_moves in paths:
+                dr_state = apply_moves(cube, dr_moves)
+                # Phase-1 ranking is intentionally cheap: evaluate both pair
+                # sides without committing to either order yet.
+                readiness = min(
+                    self._heuristic(dr_state, ((4, 8),)),
+                    self._heuristic(dr_state, ((7, 11),)),
                 )
-                state = apply_moves(state, stage)
-                moves.extend(stage)
+                score = (readiness, len(dr_moves), dr_moves)
+                dr_candidates.append((score, dr, dr_moves, dr_state))
 
-                # Stage 3: evaluate the remaining pair from the *post-square*
-                # state. Its score is useful as recognition telemetry and keeps
-                # the ranking decision tied to the state actually being solved.
-                final_score = self._heuristic(state, (final_pair,))
-                _ = final_score
+        dr_candidates.sort(key=lambda item: item[0])
+        unique: list[tuple[tuple, tuple[int, int], tuple[str, ...], CubeState]] = []
+        seen_dr: set[tuple[str, ...]] = set()
+        for item in dr_candidates:
+            if item[2] in seen_dr:
+                continue
+            seen_dr.add(item[2])
+            unique.append(item)
+            if len(unique) >= self.dr_candidate_limit:
+                break
+        self.dr_candidates_found = len(unique)
 
-                stage = self._solve_stage(
+        # Phase 2: for each of the <=3 DR candidates, look ahead through both
+        # FR-first and BR-first orders. Phase 3 then chooses the best complete
+        # human-style plan and solves only its final pair.
+        plans: list[dict[str, object]] = []
+        for _, dr, dr_moves, dr_state in unique:
+            remaining = self.max_depth - len(dr_moves)
+            if remaining < 0:
+                continue
+            for option in self._pair_order_options(dr_state, dr_moves, dr, remaining_depth=remaining):
+                plans.append({
+                    **option,
+                    "dr": dr,
+                    "dr_moves": dr_moves,
+                    "dr_state": dr_state,
+                })
+
+        plans.sort(key=lambda item: item["score"])
+        best: tuple[str, ...] | None = None
+        best_plan: dict[str, object] | None = None
+        for plan in plans:
+            dr_moves = plan["dr_moves"]
+            first_moves = plan["first_moves"]
+            final_pair = plan["final_pair"]
+            state = plan["after_first"]
+            remaining = self.max_depth - len(dr_moves) - len(first_moves)
+            if remaining < 0:
+                continue
+            try:
+                final_moves = self._solve_stage(
                     state,
                     (final_pair,),
                     include_edges=(4, 8, 11),
-                    preserve_goals=(square,),
-                    max_stage_depth=self.max_depth - len(moves),
+                    preserve_goals=(plan["first_pair"],),
+                    max_stage_depth=remaining,
                 )
-                moves.extend(stage)
             except (RuntimeError, TimeoutError):
                 continue
-
-            candidate = tuple(moves)
+            candidate = tuple(dr_moves + first_moves + final_moves)
             candidate_state = apply_moves(cube, candidate)
-            if all(
-                candidate_state.cp[pos] == self.target.cp[pos]
-                and candidate_state.co[pos] == self.target.co[pos]
-                for pos in _SB_CORNER_GOALS
-            ) and all(
-                candidate_state.ep[pos] == self.target.ep[pos]
-                and candidate_state.eo[pos] == self.target.eo[pos]
-                for pos in _SB_EDGE_GOALS
-            ) and _u_corners_on_u_layer(candidate_state, self.target):
-                if best is None or len(candidate) < len(best):
-                    best = candidate
+            if self._goal(candidate_state):
+                best = candidate
+                best_plan = plan
+                break
 
-        if best is None:
+        if best is None or best_plan is None:
             raise RuntimeError("Roux staged Second Block search failed")
+        self.selected_pair_order = best_plan["order"]
+        self.planner_score = best_plan["score"]
+        self.opportunity = {
+            **self.opportunity,
+            "dr_candidates": self.dr_candidates_found,
+            "selected_pair_order": self.selected_pair_order,
+            "planner_score": self.planner_score,
+            "lookahead_opportunity": best_plan["opportunity"],
+        }
         return best
+
+    def _solve_opportunity(self, cube: CubeState) -> tuple[str, ...] | None:
+        """Exploit an exact free square/pair without abandoning human flow."""
+        strategy = self.opportunity.get("strategy")
+        if strategy == "FREE_SQUARE":
+            for side in self.opportunity.get("squares", ()):
+                if side == "FR":
+                    square = (4, 4)
+                    adjacent_edge = 8
+                    final_pair = (7, 11)
+                else:
+                    square = (7, 4)
+                    adjacent_edge = 11
+                    final_pair = (4, 8)
+                try:
+                    remaining = self._solve_stage(
+                        cube,
+                        (final_pair,),
+                        include_edges=(4, 8, 11),
+                        preserve_goals=(square,),
+                        max_stage_depth=self.max_depth,
+                    )
+                except (RuntimeError, TimeoutError):
+                    continue
+                candidate = tuple(remaining)
+                solved = apply_moves(cube, candidate)
+                if self._goal(solved):
+                    self.strategy = "FREE_SQUARE"
+                    self.opportunity = {
+                        **self.opportunity,
+                        "selected_square": side,
+                        "adjacent_edge": adjacent_edge,
+                    }
+                    return candidate
+
+        if strategy == "FREE_PAIR":
+            pairs = self.opportunity.get("pairs", ())
+            for side in pairs:
+                if side == "FR":
+                    free_pair = (4, 8)
+                    dr_pair = (4, 4)
+                    final_pair = (7, 11)
+                    include_dr_edge = 4
+                elif side == "BR":
+                    free_pair = (7, 11)
+                    dr_pair = (7, 4)
+                    final_pair = (4, 8)
+                    include_dr_edge = 4
+                else:
+                    continue
+                try:
+                    dr_moves = self._solve_stage(
+                        cube,
+                        (dr_pair,),
+                        include_edges=(include_dr_edge,),
+                        preserve_goals=(free_pair,),
+                        max_stage_depth=min(7, self.max_depth),
+                    )
+                    after_dr = apply_moves(cube, dr_moves)
+                    final_moves = self._solve_stage(
+                        after_dr,
+                        (final_pair,),
+                        include_edges=(4, 8, 11),
+                        preserve_goals=(dr_pair, free_pair),
+                        max_stage_depth=self.max_depth - len(dr_moves),
+                    )
+                except (RuntimeError, TimeoutError):
+                    continue
+                candidate = tuple(dr_moves + final_moves)
+                solved = apply_moves(cube, candidate)
+                if self._goal(solved):
+                    self.strategy = "FREE_PAIR"
+                    self.opportunity = {**self.opportunity, "selected_pair": side}
+                    return candidate
+        return None
 
 
 def _pair_goal(cube: CubeState, reference: CubeState, corner: int, edge: int) -> bool:
@@ -985,6 +1255,10 @@ def _pair_goal(cube: CubeState, reference: CubeState, corner: int, edge: int) ->
         and cube.ep[edge] == reference.ep[edge]
         and cube.eo[edge] == reference.eo[edge]
     )
+
+
+def _edge_goal(cube: CubeState, reference: CubeState, edge: int) -> bool:
+    return cube.ep[edge] == reference.ep[edge] and cube.eo[edge] == reference.eo[edge]
 
 
 def _square_goal(cube: CubeState, reference: CubeState, corner: int, edge: int) -> bool:
@@ -1268,7 +1542,7 @@ class RouxSolver(Solver):
     method = "roux"
 
     def __init__(self, *, fb_max_depth: int = 12, fb_max_nodes: int | None = 1_000_000, fb_timeout_seconds: float | None = 10.0,
-                 sb_max_depth: int = 12, sb_max_nodes: int | None = 2_000_000, sb_timeout_seconds: float | None = 10.0) -> None:
+                 sb_max_depth: int = 14, sb_max_nodes: int | None = 2_000_000, sb_timeout_seconds: float | None = 10.0) -> None:
         self.fb_max_depth = fb_max_depth
         self.fb_max_nodes = fb_max_nodes
         self.fb_timeout_seconds = fb_timeout_seconds
@@ -1337,92 +1611,87 @@ class RouxSolver(Solver):
         if not candidates:
             raise RuntimeError("Roux First Block search failed in all four white-bottom frames")
 
-        # FB is not an isolated optimization problem: an arbitrary valid FB
-        # can leave the remaining cube in a state outside the SB subgroup.
-        # Evaluate SB continuation for each FB candidate instead of blindly
-        # selecting the shortest FB. This is the first explicit FB->SB
-        # lookahead in the Roux planner.
-        continuations = []
-        for _, candidate_frame, candidate_moves, candidate_search, candidate_planner in sorted(candidates, key=lambda item: item[:2]):
-            candidate_after = apply_moves(cube, candidate_moves)
-            candidate_reference = apply_moves(CubeState.solved(), _fb_frame(candidate_frame))
-            if not _fb_goal(candidate_after, candidate_reference):
-                continue
-            # Recognition-first SB candidate: DR-first -> square-first ->
-            # opposite pair. This gives exact refinement a concrete upper bound.
-            staged_sb = _StagedSBSearch(
+        # Human-style phase boundary: FB is optimized in isolation. Do not
+        # inspect or score SB while selecting the FB. Once the shortest valid
+        # FB is chosen, SB starts from exactly that resulting state.
+        selected_fb = min(candidates, key=lambda item: (item[0], item[1]))
+        _, candidate_frame, candidate_fb, candidate_search, candidate_planner = selected_fb
+        candidate_after = apply_moves(cube, candidate_fb)
+        candidate_reference = apply_moves(CubeState.solved(), _fb_frame(candidate_frame))
+        if not _fb_goal(candidate_after, candidate_reference):
+            raise RuntimeError("Roux First Block planner produced an invalid FB candidate")
+
+        # Recognition-first SB candidate: DR-first -> square-first ->
+        # opposite pair. This search begins only after FB has been finalized.
+        staged_sb = _StagedSBSearch(
+            target=candidate_reference,
+            max_depth=self.sb_max_depth,
+            max_nodes=self.sb_max_nodes,
+            timeout_seconds=self.sb_timeout_seconds,
+        )
+        try:
+            staged_sb_moves = staged_sb.solve(candidate_after)
+        except (RuntimeError, TimeoutError):
+            staged_sb_moves = None
+
+        # Human-style SB has priority. Direct search is deliberately an
+        # emergency/oracle fallback, not a competing strategy that can replace
+        # a valid human-style plan merely because it is shorter.
+        exact_sb_moves = None
+        if staged_sb_moves is None:
+            candidate_sb = _SecondBlockSearch(
                 target=candidate_reference,
                 max_depth=self.sb_max_depth,
                 max_nodes=self.sb_max_nodes,
-                timeout_seconds=(
-                    None
-                    if self.sb_timeout_seconds is None
-                    else min(self.sb_timeout_seconds, 2.0)
-                ),
+                timeout_seconds=self.sb_timeout_seconds,
             )
             try:
-                staged_sb_moves = staged_sb.solve(candidate_after)
+                exact_sb_moves = candidate_sb.solve(candidate_after)
             except (RuntimeError, TimeoutError):
-                staged_sb_moves = None
-
-            upper_bound = None if staged_sb_moves is None else len(staged_sb_moves)
+                exact_sb_moves = None
+        else:
             candidate_sb = _SecondBlockSearch(
                 target=candidate_reference,
-                max_depth=(
-                    self.sb_max_depth
-                    if upper_bound is None
-                    else min(self.sb_max_depth, max(0, upper_bound - 1))
-                ),
+                max_depth=self.sb_max_depth,
                 max_nodes=self.sb_max_nodes,
                 timeout_seconds=self.sb_timeout_seconds,
             )
 
-            # If the recognition-first staged solution already reaches the
-            # admissible SB lower bound, exact refinement cannot improve it.
-            # Skip the expensive bidirectional BFS in that case.
-            sb_lower_bound = staged_sb._heuristic(
-                candidate_after,
-                ((4, 8), (7, 11), (4, 4)),
-            )
-            exact_sb_moves = None
-            if staged_sb_moves is None or upper_bound is None or upper_bound > sb_lower_bound:
-                try:
-                    exact_sb_moves = candidate_sb.solve(candidate_after)
-                except (RuntimeError, TimeoutError):
-                    exact_sb_moves = None
+        candidate_sb_moves = (
+            staged_sb_moves
+            if staged_sb_moves is not None
+            else exact_sb_moves
+        )
+        if candidate_sb_moves is None:
+            raise RuntimeError("Roux Second Block search failed after the optimized First Block")
+        candidate_sb_after = apply_moves(candidate_after, candidate_sb_moves)
+        if not second_block_solved(candidate_sb_after):
+            raise RuntimeError("Roux Second Block planner produced an invalid SB candidate")
 
-            candidate_sb_moves = exact_sb_moves or staged_sb_moves
-            if candidate_sb_moves is None:
-                continue
-            candidate_sb_after = apply_moves(candidate_after, candidate_sb_moves)
-            if not second_block_solved(candidate_sb_after):
-                continue
-            continuations.append(
-                (
-                    len(candidate_moves) + len(candidate_sb_moves),
-                    candidate_frame,
-                    candidate_moves,
-                    candidate_search,
-                    candidate_planner,
-                    candidate_sb,
-                    candidate_sb_moves,
-                    candidate_sb_after,
-                    staged_sb,
-                    exact_sb_moves is not None,
-                )
-            )
-
-        if not continuations:
-            raise RuntimeError("Roux First+Second Block search failed: no FB candidate had a valid SB continuation")
+        selected_continuation = (
+            len(candidate_fb) + len(candidate_sb_moves),
+            candidate_frame,
+            candidate_fb,
+            candidate_search,
+            candidate_planner,
+            candidate_sb,
+            candidate_sb_moves,
+            candidate_sb_after,
+            staged_sb,
+            exact_sb_moves is not None,
+        )
 
         # A valid FB+SB pair is not necessarily a legal CMLL starting
         # position: the SB projection intentionally does not constrain the
         # four remaining U-layer corners. Select the shortest continuation
-        # that is also CMLL-recognizable before entering the LSE phases.
+        # that is also CMLL-recognizable before entering the LSE phases. If a
+        # human-style SB plan cannot support the complete Roux continuation,
+        # only then add the direct SB oracle as a fallback candidate.
         selected = None
         continuation_errors: list[str] = []
         lse = _LSEFormulaDatabase()
-        for continuation in sorted(continuations, key=lambda item: (item[0], len(item[2]), item[1])):
+        continuation_candidates = [selected_continuation]
+        for continuation_index, continuation in enumerate(continuation_candidates):
             _, candidate_frame, candidate_fb, candidate_search, candidate_planner, candidate_sb_search, candidate_sb_moves, candidate_sb_after, candidate_staged_sb, candidate_sb_exact = continuation
             candidate_reference = apply_moves(CubeState.solved(), _fb_frame(candidate_frame))
             candidate_lse_state = candidate_sb_after
@@ -1449,6 +1718,36 @@ class RouxSolver(Solver):
                 candidate_l4e_after = apply_moves(candidate_ulur_after, candidate_l4e_moves)
             except RuntimeError as exc:
                 continuation_errors.append(str(exc))
+                if continuation_index == 0 and staged_sb_moves is not None:
+                    fallback_search = _SecondBlockSearch(
+                        target=candidate_reference,
+                        max_depth=self.sb_max_depth,
+                        max_nodes=self.sb_max_nodes,
+                        timeout_seconds=self.sb_timeout_seconds,
+                    )
+                    try:
+                        fallback_moves = fallback_search.solve(candidate_after)
+                    except (RuntimeError, TimeoutError) as fallback_exc:
+                        continuation_errors.append(
+                            f"direct SB fallback failed: {fallback_exc}"
+                        )
+                        fallback_moves = None
+                    if fallback_moves is not None:
+                        fallback_after = apply_moves(candidate_after, fallback_moves)
+                        continuation_candidates.append(
+                            (
+                                len(candidate_fb) + len(fallback_moves),
+                                candidate_frame,
+                                candidate_fb,
+                                candidate_search,
+                                candidate_planner,
+                                fallback_search,
+                                fallback_moves,
+                                fallback_after,
+                                staged_sb,
+                                True,
+                            )
+                        )
                 continue
             selected = continuation + (candidate_reference, candidate_cmll, candidate_cmll_moves, candidate_eo_case, candidate_eo_moves, candidate_ulur_case, candidate_ulur_moves, candidate_l4e_case, candidate_l4e_moves)
             break
@@ -1559,9 +1858,16 @@ class RouxSolver(Solver):
                 "fb_depth": len(fb_moves),
                 "sb_depth": len(sb_inner),
                 "sb_search": "bidirectional-bfs",
-                "sb_planner": "dr-first/square-first staged + exact refinement",
+                "sb_planner": staged_sb.strategy if staged_sb_moves is not None else "direct_fallback",
+                "sb_strategy": staged_sb.strategy if staged_sb_moves is not None else "DIRECT_FALLBACK",
+                "sb_opportunity": staged_sb.opportunity,
                 "sb_exact_refinement": sb_exact,
+                "sb_fallback": staged_sb_moves is None,
                 "sb_staged_nodes": staged_sb.nodes,
+                "sb_dr_candidates": staged_sb.dr_candidates_found,
+                "sb_dr_candidate_limit": staged_sb.dr_candidate_limit,
+                "sb_pair_order": staged_sb.selected_pair_order,
+                "sb_planner_score": staged_sb.planner_score,
                 "cmll_case": (
                     cmll.recognize(sb_after)[0]["id"]
                     if _cmll_recognized(cmll, sb_after)

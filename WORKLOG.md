@@ -1,3 +1,47 @@
+### 2026-10-04 - Roux SB three-phase DR candidate + pair-order planner
+
+- Implemented the requested full three-phase SB improvement after fixed FB.
+- Phase 1 now generates and ranks DR candidates across both natural DR constructions, with a hard cap of **3 candidates total**.
+- Phase 2 evaluates both `FR_FIRST` and `BR_FIRST` for every retained DR candidate by actually solving the first pair, then scoring the remaining pair from the resulting state.
+- Phase 3 selects the best human-style plan from that lookahead and solves the final pair; direct SB remains the emergency/oracle fallback.
+- Added opportunity-aware planner scoring so a free pair/square left after the first pair can improve the plan ranking.
+- Added metadata: `sb_dr_candidates`, `sb_dr_candidate_limit`, `sb_pair_order`, `sb_planner_score`.
+- Kept the FB/SB boundary unchanged: SB never influences FB selection.
+- Focused tests: `2 passed` for short-scramble + opportunity recognition.
+- Deterministic + hard fixed-FB boundary tests: `2 passed in 78.13s`.
+- Changes are intentionally **not committed**; commit only when explicitly requested.
+
+### 2026-10-04 - Roux FB/SB phase boundary
+
+- Decision: tach hoan toan FB va SB de planner co hanh vi gan human solve.
+- FB candidate selection khong con dung SB continuation/lookahead de danh gia hoac chon FB; chon candidate FB ngan nhat truoc.
+- Chi sau khi FB duoc chot moi khoi chay SB search tu state sau FB.
+- Cap nhat PROJECT_SPEC.md them rule khong tu dong commit; chi commit khi user yeu cau ro rang.
+- Chua commit thay doi theo dung rule moi.
+
+### 2026-10-04 - Learning-oriented solver philosophy
+
+- Decision: ghi ro trong tai lieu nen tang rang RubikSolver duoc xay dung de cuber co the hoc hoi tu solution, khong chi de lay sequence hop le/ngan.
+- Solution architecture phai uu tien phase boundaries, human-style decisions, explainable metadata va tach biet human-style / optimized / fallback-oracle.
+- Roux duoc dung lam reference implementation dau tien cho philosophy nay; cac nguyen tac nay phai duoc tai su dung khi tiep tuc CFOP dang pending.
+- SB architecture: FREE_SQUARE/FREE_PAIR opportunity -> DR-first co lookahead -> direct SB emergency/oracle fallback.
+- Chua commit thay doi theo rule cua project.
+
+### 2026-10-04 - Roux human-style SB planner implementation
+
+- Implemented `SBOpportunityDetector` with exact `FREE_SQUARE` / `FREE_PAIR` recognition on the fixed post-FB state.
+- Kept DR-first as the normal SB strategy, with both FR/BR construction directions and post-DR scoring already available in the staged planner.
+- Increased direct SB emergency/oracle search default from 12 to 14 HTM moves while keeping the 2,000,000-node limit.
+- Removed the old internal 2-second staged-SB timeout cap; configured SB budget is now honored by the human-style planner and direct fallback.
+- Direct SB no longer competes with a successful human-style SB plan. It is invoked only when human-style SB cannot solve, or when the human-style SB result cannot support the downstream CMLL/LSE continuation.
+- Added SB strategy/opportunity/fallback metadata for future learning-oriented UI and diagnostics.
+- Added tests for free-square recognition and the intentional hard phase-boundary case; API fallback regression expectation now accepts the new Roux error wording.
+- Test result: `tests/test_roux.py` = `17 passed`.
+- Test result: `tests/test_api.py` = `7 passed, 1 fallback regression` during the targeted run after updating the assertion; the full project suite subsequently passed.
+- Final full regression: `121 passed in 216.86s (3:36)`; `python -m py_compile src/rubik_solver/solvers/roux.py` also passed.
+- Known limitation: some states whose independently optimized FB leaves SB/LSE outside the 14-move/2M-node human-style+oracle budget can still fail at the Roux core layer; API-level Kociemba fallback remains the safety net. This is intentional under the fixed FB/SB boundary and is a future SB-planner improvement target, not a reason to re-couple FB to SB.
+- NEXT ACTION: improve DR candidate generation / pair-order lookahead so more difficult fixed-FB states are solved human-style before direct oracle fallback is reached.
+
 # RubikSolver â€” Session Handoff / Development Trace
 
 > **Má»¥c Ä‘Ã­ch:** ÄÃ¢y lÃ  file truy váº¿t chÃ­nh Ä‘á»ƒ tiáº¿p tá»¥c project giá»¯a cÃ¡c phiÃªn ChatGPT/PalmBridge.

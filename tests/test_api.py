@@ -73,7 +73,7 @@ def test_solve_endpoint_roux_falls_back_for_hard_scramble() -> None:
     assert payload["method"] == "kociemba"
     assert payload["verified"] is True
     assert payload["metadata"]["fallback_from"] == "roux"
-    assert "First+Second Block" in payload["metadata"]["fallback_reason"]
+    assert "Roux" in payload["metadata"]["fallback_reason"]
 
 
 def test_solve_endpoint_supports_cfop() -> None:
