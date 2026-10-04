@@ -931,7 +931,11 @@ class _StagedSBSearch:
                 stage = self._solve_stage(
                     state,
                     (square,),
-                    include_edges=(4,),
+                    # Preserve/recognize the edge belonging to the selected
+                    # square. Plan A uses FR (edge 8), while plan B uses BR
+                    # (edge 11). Hard-coding FR here made the DBR->BR route
+                    # impossible unless FR happened to be solved already.
+                    include_edges=(square[1],),
                     preserve_goals=(dr,),
                     max_stage_depth=min(7, self.max_depth - len(moves)),
                 )

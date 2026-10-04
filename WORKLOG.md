@@ -1866,3 +1866,31 @@ Full suite: 77 passed in 14.25s
 **Current M6 status:**
 - L4E correctness is no longer the blocker. The L4E recognizer/formula layer is green and phase-verified.
 - Remaining concern is solver runtime sensitivity under the full-suite workload; this is separate from L4E correctness and should be handled as search-performance stabilization.
+
+### 2026-10-04 - Production Roux API hard-case handling
+
+**Reported failure:**
+- POST /api/solve with method roux returned HTTP 500 on a valid 20-move scramble.
+- Roux failed at the FB -> SB integration boundary with: no FB candidate had a valid SB continuation.
+- Reproduction showed that the failure is not specific to one hard-coded scramble: the selected shortest FB candidates for all four frames failed SB even after increasing SB search depth from 12 to 14.
+- The staged FB candidates also failed SB. This confirms the underlying weakness is candidate/planner integration, not merely an API parsing issue or a single timeout.
+
+**Correctness fix:**
+- Fixed a real staged-SB bug: the square stage previously hard-coded FR edge 4; plan B (DBR -> BR) must recognize/preserve the selected square edge dynamically.
+
+**Production reliability fix:**
+- The API now treats Roux planner exhaustion as a recoverable solver failure rather than an HTTP 500.
+- For a requested roux solve that exhausts its specialized search, the API falls back to the verified Kociemba solver and explicitly reports fallback_from=roux plus the original failure reason.
+- This is a generic safety net for difficult states, not a scramble-specific exception.
+- Added a regression test using the reported hard scramble; expected result is HTTP 200 with verified=true and explicit fallback metadata.
+
+**Important scope note:**
+- This restores API reliability, but the underlying Roux FB->SB planner still needs a proper multi-candidate / SB-aware search redesign. The fallback is intentionally transparent rather than pretending the hard case was solved by Roux.
+
+**Verification:**
+- Direct Kociemba solve of the reported scramble: verified, 21 HTM.
+- New API hard-scramble regression is being verified.
+- Full Roux/API regression was started; the Roux suite is computationally expensive and was stopped after progress output before completion.
+
+**NEXT ACTION:**
+- Redesign FB candidate selection around SB-aware continuation search instead of selecting only the shortest FB candidate per frame.

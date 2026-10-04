@@ -59,6 +59,23 @@ def test_solve_endpoint_reports_unavailable_solver() -> None:
     assert payload["phases"][0]["name"] == "First Block"
 
 
+def test_solve_endpoint_roux_falls_back_for_hard_scramble() -> None:
+    response = client.post(
+        "/api/solve",
+        json={
+            "scramble": "L2 F2 R2 F' U2 R2 F' L2 B2 U2 F R' D U2 F U B2 F' R' F2",
+            "method": "roux",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["method"] == "kociemba"
+    assert payload["verified"] is True
+    assert payload["metadata"]["fallback_from"] == "roux"
+    assert "First+Second Block" in payload["metadata"]["fallback_reason"]
+
+
 def test_solve_endpoint_supports_cfop() -> None:
     response = client.post(
         "/api/solve",
