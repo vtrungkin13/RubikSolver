@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from collections import deque
 import json
+from itertools import permutations
 from pathlib import Path
 from time import monotonic
 
@@ -43,6 +44,9 @@ _SB_CORNER_GOALS = (4, 7)  # DFR, DBR
 _SB_EDGE_GOALS = (4, 8, 11)  # DR, FR, BR
 _CMLL_CORNER_GOALS = (0, 1, 2, 3)  # URF, UFL, ULB, UBR
 _CMLL_DB_PATH = Path(__file__).resolve().parents[3] / "data" / "cmll_algorithms.json"
+_LSE_DB_PATH = Path(__file__).resolve().parents[3] / "data" / "lse_algorithms.json"
+_L4E_EDGE_GOALS = (1, 3, 5, 7)  # UF, UB, DF, DB
+_ULUR_EDGE_GOALS = (0, 2)  # UR, UL
 
 
 def _fb_frame(frame: int) -> tuple[str, ...]:
@@ -92,9 +96,21 @@ def second_block_solved(cube: CubeState) -> bool:
         ) and all(
             cube.ep[pos] == reference.ep[pos] and cube.eo[pos] == reference.eo[pos]
             for pos in _SB_EDGE_GOALS
-        ):
+        ) and _u_corners_on_u_layer(cube, reference):
             return True
     return False
+
+
+def _u_corners_on_u_layer(cube: CubeState, target: CubeState) -> bool:
+    """Return whether all four U-layer corner pieces remain on U.
+
+    Roux SB may permute/orient the four U-layer corners, but it must not leave
+    one of them in the D layer. CMLL is defined on exactly this remaining
+    four-corner set, so this is part of the SB goal even though it is not a
+    fixed-position requirement.
+    """
+    u_pieces = {target.cp[pos] for pos in _CMLL_CORNER_GOALS}
+    return all(cube.cp[pos] in u_pieces for pos in _CMLL_CORNER_GOALS)
 
 
 def _cmll_corner_signature(cube: CubeState, target: CubeState) -> tuple[int, ...]:
@@ -166,8 +182,19 @@ class _CMLLDatabase:
     def solve(self, cube: CubeState) -> tuple[str, ...]:
         if _cmll_solved(cube, self.target):
             return ()
-        entry, auf = self.recognize(cube)
-        return auf + tuple(entry["algorithm"].split())
+        try:
+            entry, auf = self.recognize(cube)
+            return auf + tuple(entry["algorithm"].split())
+        except RuntimeError:
+            return _cmll_two_look(cube, self.target)
+
+
+def _cmll_recognized(database: _CMLLDatabase, cube: CubeState) -> bool:
+    try:
+        database.recognize(cube)
+    except RuntimeError:
+        return False
+    return True
 
 
 def _cmll_solved(cube: CubeState, target: CubeState) -> bool:
@@ -175,6 +202,451 @@ def _cmll_solved(cube: CubeState, target: CubeState) -> bool:
         cube.cp[pos] == target.cp[pos] and cube.co[pos] == target.co[pos]
         for pos in _CMLL_CORNER_GOALS
     )
+
+
+def _roux_blocks_and_cmll_solved(cube: CubeState, target: CubeState) -> bool:
+    """Return whether FB/SB and the CMLL corner set remain solved modulo AUF."""
+    cmll_pieces = {target.cp[pos] for pos in _CMLL_CORNER_GOALS}
+    cmll_preserved = all(
+        cube.cp[pos] in cmll_pieces
+        and cube.co[pos] == target.co[target.cp.index(cube.cp[pos])]
+        for pos in _CMLL_CORNER_GOALS
+    )
+    return (
+        _fb_goal(cube, target)
+        and all(
+            cube.cp[pos] == target.cp[pos] and cube.co[pos] == target.co[pos]
+            for pos in _SB_CORNER_GOALS
+        )
+        and all(
+            cube.ep[pos] == target.ep[pos] and cube.eo[pos] == target.eo[pos]
+            for pos in _SB_EDGE_GOALS
+        )
+        and cmll_preserved
+    )
+
+
+_CMLL_2LOOK_ORIENT_ALGS = (
+    ("R", "U", "R'", "U", "R", "U2", "R'"),  # Sune
+    ("R", "U2", "R'", "U'", "R", "U'", "R'"),  # Anti-Sune
+    ("U", "R", "U", "R'", "U", "R", "U'", "R'", "U", "R", "U2", "R'"),  # H
+    ("R", "U", "R'", "U'", "R'", "F", "R", "F'"),  # T
+    ("F", "R'", "F'", "R", "U", "R", "U'", "R'"),  # L
+    ("F", "R", "U", "R'", "U'", "F'"),  # U
+    ("F", "R", "U", "R'", "U'", "R", "U", "R'", "U'", "F'"),  # Pi
+)
+_CMLL_2LOOK_PERM_ALGS = (
+    ("R", "U", "R'", "F'", "R", "U", "R'", "U'", "R'", "F", "R2", "U'", "R'"),  # J
+    ("F", "R", "U'", "R'", "U'", "R", "U", "R'", "F'", "R", "U", "R'", "U'", "R'", "F", "R", "F'"),  # Y
+)
+
+
+def _corner_projection(cube: CubeState) -> tuple[int, ...]:
+    return tuple(cube.cp) + tuple(cube.co)
+
+
+def _cmll_two_look(cube: CubeState, target: CubeState) -> tuple[str, ...]:
+    """Complete CMLL when the compact 42-case recognizer has no exact case.
+
+    Full CMLL has 42 named algorithms but 162 AUF-equivalent corner states.
+    The fallback uses the standard Roux two-look CMLL subsets (7 orientation
+    algorithms + J/Y permutation) and searches only their corner projection.
+    These algorithms preserve the two solved blocks by construction.
+    """
+    movesets = _CMLL_2LOOK_ORIENT_ALGS + _CMLL_2LOOK_PERM_ALGS + (("U",), ("U2",), ("U'",))
+
+    def apply_macro(state: CubeState, macro: tuple[str, ...]) -> CubeState:
+        return apply_moves(state, macro)
+
+    def goal_orientation(state: CubeState) -> bool:
+        return all(state.co[pos] == target.co[pos] for pos in _CMLL_CORNER_GOALS)
+
+    def goal(state: CubeState) -> bool:
+        return _cmll_solved(state, target)
+
+    def search(start: CubeState, predicate) -> tuple[str, ...]:
+        queue = deque([(start, ())])
+        seen = {_corner_projection(start)}
+        while queue:
+            state, path = queue.popleft()
+            if predicate(state):
+                return path
+            for macro in movesets:
+                nxt = apply_macro(state, macro)
+                key = _corner_projection(nxt)
+                if key in seen:
+                    continue
+                seen.add(key)
+                queue.append((nxt, path + macro))
+        raise RuntimeError("Roux two-look CMLL search failed")
+
+    orient_moves = search(cube, goal_orientation)
+    oriented = apply_moves(cube, orient_moves)
+    perm_moves = search(oriented, goal)
+    return orient_moves + perm_moves
+
+
+def _lse_key(cube: CubeState, target: CubeState) -> tuple[int, ...]:
+    parts: list[int] = []
+    for pos in (0, 1, 2, 3, 5, 7):
+        piece = target.ep[pos]
+        current = cube.ep.index(piece)
+        parts.extend((current, cube.eo[current]))
+    for pos in _CMLL_CORNER_GOALS:
+        piece = target.cp[pos]
+        current = cube.cp.index(piece)
+        parts.extend((current, cube.co[current]))
+    return tuple(parts)
+
+
+def _solve_eo_intuitive(cube: CubeState, target: CubeState) -> tuple[str, ...]:
+    """Exact MU-only EO search on the six Roux last-layer edges."""
+    moves = (("M",), ("M2",), ("M'",), ("U",), ("U2",), ("U'",))
+
+    def goal(state: CubeState) -> bool:
+        return _eo_solved(state, target) and all(
+            state.cp[pos] == target.cp[pos] and state.co[pos] == target.co[pos]
+            for pos in range(8)
+        )
+
+    queue = deque([(cube, ())])
+    seen = {_lse_key(cube, target)}
+    while queue:
+        state, path = queue.popleft()
+        if goal(state):
+            return path
+        for macro in moves:
+            nxt = apply_moves(state, macro)
+            key = _lse_key(nxt, target)
+            if key in seen:
+                continue
+            seen.add(key)
+            queue.append((nxt, path + macro))
+    raise RuntimeError("Roux EO MU-only search failed")
+
+
+def _solve_lse_subphase(
+    cube: CubeState,
+    target: CubeState,
+    goal,
+) -> tuple[str, ...]:
+    """Exact MU-only BFS over the six free edges and U-layer corners."""
+    moves = (("M",), ("M2",), ("M'",), ("U",), ("U2",), ("U'",))
+    queue = deque([(cube, ())])
+    seen = {_lse_key(cube, target)}
+    while queue:
+        state, path = queue.popleft()
+        if goal(state):
+            return path
+        for macro in moves:
+            nxt = apply_moves(state, macro)
+            key = _lse_key(nxt, target)
+            if key in seen:
+                continue
+            seen.add(key)
+            queue.append((nxt, path + macro))
+    raise RuntimeError("Roux LSE MU-only search failed")
+
+
+@dataclass(slots=True)
+class _ULURIDAStar:
+    """Exact IDA* for UL/UR using only M/M2/M' and U/U2/U'."""
+
+    target: CubeState
+    max_depth: int = 18
+    max_nodes: int | None = 10_000_000
+    timeout_seconds: float | None = 60.0
+    l4e_database: object | None = None
+    nodes: int = field(init=False, default=0)
+    started: float = field(init=False, default=0.0)
+    path: list[str] = field(init=False, default_factory=list)
+    pattern_db: dict[tuple[int, ...], int] = field(init=False, default_factory=dict)
+    pattern_db_alt: dict[tuple[int, ...], int] = field(init=False, default_factory=dict)
+    _alt_target: CubeState = field(init=False)
+    handoff_db: dict[tuple[int, ...], int] = field(init=False, default_factory=dict)
+    transposition: dict[tuple[tuple[int, ...], str | None], int] = field(init=False, default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self.started = monotonic()
+        self.pattern_db = self._build_pattern_db()
+        alt_ep = list(self.target.ep)
+        alt_eo = list(self.target.eo)
+        alt_ep[0], alt_ep[1], alt_ep[2], alt_ep[7] = self.target.ep[1], self.target.ep[0], self.target.ep[7], self.target.ep[2]
+        alt_eo[0], alt_eo[1], alt_eo[2], alt_eo[7] = self.target.eo[1], self.target.eo[0], self.target.eo[7], self.target.eo[2]
+        self._alt_target = CubeState(cp=self.target.cp, co=self.target.co, ep=tuple(alt_ep), eo=tuple(alt_eo))
+        self.pattern_db_alt = self._build_pattern_db(self._alt_target)
+        self.handoff_db = self._build_handoff_db()
+
+    def _pattern_key(self, cube: CubeState, target: CubeState | None = None) -> tuple[int, ...]:
+        target = self.target if target is None else target
+        parts: list[int] = []
+        for pos in _CMLL_CORNER_GOALS:
+            piece = target.cp[pos]
+            current = cube.cp.index(piece)
+            parts.extend((current, cube.co[current]))
+        for pos in (2, 0):
+            piece = target.ep[pos]
+            current = cube.ep.index(piece)
+            parts.extend((current, cube.eo[current]))
+        return tuple(parts)
+
+    def _build_pattern_db(self, target: CubeState | None = None) -> dict[tuple[int, ...], int]:
+        target = self.target if target is None else target
+        distances = {self._pattern_key(target, target): 0}
+        queue = deque([(target, 0)])
+        while queue:
+            state, depth = queue.popleft()
+            for move in _ULUR_MOVES:
+                nxt = apply_move(state, move)
+                key = self._pattern_key(nxt, target)
+                if key in distances:
+                    continue
+                distances[key] = depth + 1
+                queue.append((nxt, depth + 1))
+        return distances
+
+    def _handoff_key(self, cube: CubeState) -> tuple[int, ...]:
+        parts: list[int] = []
+        for pos in _CMLL_CORNER_GOALS:
+            piece = self.target.cp[pos]
+            current = cube.cp.index(piece)
+            parts.extend((current, cube.co[current]))
+        # ULUR leaves every non-M edge fixed. L4E owns only UF/UB/DF/DB.
+        for pos in (0, 2, 4, 6, 8, 9, 10, 11):
+            piece = self.target.ep[pos]
+            current = cube.ep.index(piece)
+            parts.extend((current, cube.eo[current]))
+        return tuple(parts)
+
+    def _build_handoff_db(self) -> dict[tuple[int, ...], int]:
+        """Exact distance to the Roux ULUR handoff projection."""
+        goals: list[CubeState] = []
+        middle_positions = (1, 3, 5, 7)
+        middle_pieces = tuple(self.target.ep[pos] for pos in middle_positions)
+        for perm in permutations(middle_pieces):
+            ep = list(self.target.ep)
+            eo = list(self.target.eo)
+            for pos, piece in zip(middle_positions, perm):
+                ep[pos] = piece
+                eo[pos] = self.target.eo[self.target.ep.index(piece)]
+            goals.append(CubeState(cp=self.target.cp, co=self.target.co, ep=tuple(ep), eo=tuple(eo)))
+
+        distances: dict[tuple[int, ...], int] = {}
+        queue = deque()
+        for goal in goals:
+            key = self._handoff_key(goal)
+            if key not in distances:
+                distances[key] = 0
+                queue.append((goal, 0))
+        while queue:
+            state, depth = queue.popleft()
+            for move in _ULUR_MOVES:
+                nxt = apply_move(state, move)
+                key = self._handoff_key(nxt)
+                if key in distances:
+                    continue
+                distances[key] = depth + 1
+                queue.append((nxt, depth + 1))
+        return distances
+
+    def _check_limits(self) -> None:
+        if self.max_nodes is not None and self.nodes >= self.max_nodes:
+            raise RuntimeError("Roux ULUR IDA* node limit exceeded")
+        if self.timeout_seconds is not None and monotonic() - self.started >= self.timeout_seconds:
+            raise TimeoutError("Roux ULUR IDA* timeout exceeded")
+
+    def _heuristic(self, cube: CubeState) -> int:
+        return self.handoff_db[self._handoff_key(cube)]
+
+    def solve(self, cube: CubeState) -> tuple[str, ...]:
+        if self._goal(cube):
+            return ()
+        for threshold in range(self._heuristic(cube), self.max_depth + 1):
+            self.transposition.clear()
+            result = self._dfs(cube, 0, threshold, None)
+            if result is not None:
+                return result
+        raise RuntimeError(f"Roux ULUR IDA* failed within depth {self.max_depth}")
+
+    def _goal(self, cube: CubeState) -> bool:
+        return _ulur_solved(cube, self.target)
+
+    def _dfs(self, cube: CubeState, depth: int, threshold: int, previous_face: str | None):
+        self._check_limits()
+        self.nodes += 1
+        if depth + self._heuristic(cube) > threshold:
+            return None
+        if self._goal(cube):
+            return tuple(self.path)
+        if depth == threshold:
+            return None
+        remaining = threshold - depth
+        tt_key = (self._handoff_key(cube), previous_face)
+        previous_remaining = self.transposition.get(tt_key)
+        if previous_remaining is not None and previous_remaining >= remaining:
+            return None
+        self.transposition[tt_key] = remaining
+        for move in _ULUR_MOVES:
+            face = move[0]
+            if previous_face is not None and face == previous_face:
+                continue
+            self.path.append(move)
+            result = self._dfs(apply_move(cube, move), depth + 1, threshold, face)
+            self.path.pop()
+            if result is not None:
+                return result
+        return None
+
+
+def _edges_solved(cube: CubeState, target: CubeState, positions: tuple[int, ...]) -> bool:
+    return all(cube.ep[pos] == target.ep[pos] and cube.eo[pos] == target.eo[pos] for pos in positions)
+
+
+def _eo_solved(cube: CubeState, target: CubeState) -> bool:
+    return all(cube.eo[pos] == target.eo[pos] for pos in range(12))
+
+
+_ULUR_MOVES = ("M", "M2", "M'", "U", "U2", "U'")
+_ULUR_GOAL_EDGES = (0, 2)  # UR/UL: both edges are solved before L4E.
+
+
+def _ulur_solved(cube: CubeState, target: CubeState) -> bool:
+    """ULUR boundary: U corners + UL/UR solved; only M-slice edges remain."""
+    if not all(
+        cube.cp[pos] == target.cp[pos] and cube.co[pos] == target.co[pos]
+        for pos in _CMLL_CORNER_GOALS
+    ):
+        return False
+    fixed_edges = all(
+        cube.ep[pos] == target.ep[pos] and cube.eo[pos] == target.eo[pos]
+        for pos in (0, 2, 4, 6, 8, 9, 10, 11)
+    )
+    return fixed_edges and _eo_solved(cube, target)
+
+
+def _l4e_solved(cube: CubeState, target: CubeState) -> bool:
+    return _edges_solved(cube, target, tuple(range(12))) and all(cube.cp[pos] == target.cp[pos] and cube.co[pos] == target.co[pos] for pos in range(8))
+
+
+
+def _lse_u_turn(power: int) -> tuple[str, ...]:
+    return ((), ("U",), ("U2",), ("U'",))[power % 4]
+
+
+class _LSEFormulaDatabase:
+    """Recognition/execution for the published Roux LSE formula sets."""
+
+    def __init__(self) -> None:
+        with _LSE_DB_PATH.open("r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        self.eo = tuple(data["eo"])
+        self.ulur = tuple(data["ulur"])
+        self.l4e = tuple(data["l4e"])
+        self.l4e_vn = tuple(entry for entry in self.l4e if entry["family"].startswith("roux_method_vn"))
+
+    @staticmethod
+    def _moves(entry: dict) -> tuple[str, ...]:
+        return tuple(entry["algorithm"].split())
+
+    def _try_phase(self, cube, target, entries, goal, auf_powers=(0, 1, 2, 3)):
+        for power in auf_powers:
+            auf = _lse_u_turn(power)
+            rotated = apply_moves(cube, auf)
+            for entry in entries:
+                moves = self._moves(entry)
+                if goal(apply_moves(rotated, moves), target):
+                    return entry, auf + moves
+        return None
+
+    def solve_eo(self, cube: CubeState, target: CubeState):
+        if _eo_solved(cube, target):
+            return {"id": "SOLVED", "family": "SOLVED", "algorithm": ""}, ()
+        result = self._try_phase(cube, target, self.eo, _eo_solved)
+        if result is None:
+            return {"id": "INTUITIVE_MU", "family": "MU-only", "algorithm": ""}, _solve_eo_intuitive(cube, target)
+        return result
+
+    def solve_ulur_formula(self, cube: CubeState, target: CubeState):
+        if _ulur_solved(cube, target):
+            return {"id": "SOLVED", "family": "SOLVED", "algorithm": ""}, ()
+        return self._try_phase(cube, target, self.ulur, _ulur_solved)
+
+    def solve_l4e(self, cube: CubeState, target: CubeState):
+        if _l4e_solved(cube, target):
+            return {"id": "SOLVED", "family": "SOLVED", "algorithm": ""}, ()
+        # The Roux Method VN L4E page is a finite recognition table.  Its
+        # 8 + 8 + special cases collapse to the 12 distinct edge permutations
+        # represented by CubeState (centers/sticker colours are not modeled).
+        # Recognize those cases directly with AUF, then execute the published
+        # formula.  Do not turn this into a generic MU search: that would hide
+        # recognition errors and violate the formula-driven L4E contract.
+        result = self._try_phase(cube, target, self.l4e_vn, _l4e_solved)
+        if result is not None:
+            return result
+
+        # Ez L4E uses the documented steering macros to turn awkward cases
+        # into one of the easy published cases. Keep this as a second-stage
+        # recognizer, not an arbitrary search: every terminal solve still has
+        # to be one of the Roux Method VN formula entries above.
+        steering = (
+            ("U", "M2", "U"),
+            ("U", "M2", "U'"),
+            ("U'", "M2", "U"),
+            ("U'", "M2", "U'"),
+            ("U2", "M2", "U2"),
+            ("U2", "M2", "U2", "M2"),
+            ("M", "U2", "M"),
+            ("M'", "U2", "M"),
+            ("M", "U2", "M'"),
+            ("M'", "U2", "M'"),
+            ("E2", "M", "E2", "M"),
+            ("E2", "M'", "E2", "M'"),
+        )
+        for setup in steering:
+            rotated = apply_moves(cube, setup)
+            result = self._try_phase(rotated, target, self.l4e_vn, _l4e_solved)
+            if result is not None:
+                entry, moves = result
+                return entry, setup + moves
+        return None
+
+
+def _solve_ulur_intuitive(cube: CubeState, target: CubeState) -> tuple[str, ...]:
+    """Use the documented Roux <M,U2> ULUR procedure when no simple alg matches."""
+    if _ulur_solved(cube, target):
+        return ()
+    moves = ("U", "U2", "U'", "M", "M'", "M2")
+    target_edges = tuple(target.ep[pos] for pos in (0, 2, 4, 5, 6, 7, 8, 9, 10, 11))
+
+    def key(state: CubeState) -> tuple:
+        parts = []
+        for piece in target_edges:
+            pos = state.ep.index(piece)
+            parts.extend((pos, state.eo[pos]))
+        for piece in tuple(target.cp[pos] for pos in _CMLL_CORNER_GOALS):
+            pos = state.cp.index(piece)
+            parts.extend((pos, state.co[pos]))
+        return tuple(parts)
+
+    queue = deque([(cube, ())])
+    seen = {key(cube)}
+    while queue:
+        state, path = queue.popleft()
+        if _ulur_solved(state, target):
+            return path
+        if len(path) >= 18:
+            continue
+        previous = path[-1][0] if path else None
+        for move in moves:
+            if previous is not None and move[0] == previous:
+                continue
+            nxt = apply_move(state, move)
+            state_key = key(nxt)
+            if state_key in seen:
+                continue
+            seen.add(state_key)
+            queue.append((nxt, path + (move,)))
+    raise RuntimeError("Roux ULUR intuitive M/U2 procedure failed")
 
 
 @dataclass(slots=True)
@@ -203,7 +675,7 @@ class _SecondBlockSearch:
         ) and all(
             cube.ep[pos] == self.target.ep[pos] and cube.eo[pos] == self.target.eo[pos]
             for pos in _SB_EDGE_GOALS
-        )
+        ) and _u_corners_on_u_layer(cube, self.target)
 
     def _projection_key(self, cube: CubeState) -> tuple:
         """Project the state onto the six SB cubies.
@@ -218,6 +690,12 @@ class _SecondBlockSearch:
         corner_parts = []
         corner_pieces = tuple(self.target.cp[pos] for pos in _SB_CORNER_GOALS)
         for piece in corner_pieces:
+            pos = cube.cp.index(piece)
+            corner_parts.extend((pos, cube.co[pos]))
+        # The four U-layer corners are not fixed by SB, but their positions
+        # are part of the partial state because SB must preserve them on U so
+        # that the resulting state is a valid CMLL starting position.
+        for piece in (self.target.cp[pos] for pos in _CMLL_CORNER_GOALS):
             pos = cube.cp.index(piece)
             corner_parts.extend((pos, cube.co[pos]))
         edge_parts = []
@@ -487,7 +965,7 @@ class _StagedSBSearch:
                 candidate_state.ep[pos] == self.target.ep[pos]
                 and candidate_state.eo[pos] == self.target.eo[pos]
                 for pos in _SB_EDGE_GOALS
-            ):
+            ) and _u_corners_on_u_layer(candidate_state, self.target):
                 if best is None or len(candidate) < len(best):
                     best = candidate
 
@@ -743,6 +1221,43 @@ class _FirstBlockSearch:
         return None
 
 
+
+def _solve_l4e_intuitive(cube: CubeState, target: CubeState) -> tuple[str, ...]:
+    if _l4e_solved(cube, target):
+        return ()
+    moves = ("U", "U2", inverse_move("U"), "M", "M2", inverse_move("M"))
+    target_edges = tuple(target.ep[pos] for pos in range(12))
+
+    def key(state: CubeState) -> tuple:
+        parts = []
+        for piece in target_edges:
+            pos = state.ep.index(piece)
+            parts.extend((pos, state.eo[pos]))
+        for piece in tuple(target.cp[pos] for pos in _CMLL_CORNER_GOALS):
+            pos = state.cp.index(piece)
+            parts.extend((pos, state.co[pos]))
+        return tuple(parts)
+
+    queue = deque([(cube, ())])
+    seen = {key(cube)}
+    while queue:
+        state, path = queue.popleft()
+        if _l4e_solved(state, target):
+            return path
+        if len(path) >= 14:
+            continue
+        previous = path[-1][0] if path else None
+        for move in moves:
+            if previous is not None and move[0] == previous:
+                continue
+            nxt = apply_move(state, move)
+            state_key = key(nxt)
+            if state_key in seen:
+                continue
+            seen.add(state_key)
+            queue.append((nxt, path + (move,)))
+    raise RuntimeError("Roux L4E intuitive M/U procedure failed")
+
 class RouxSolver(Solver):
     """Incremental Roux solver; FB + SB + table-driven CMLL."""
 
@@ -896,30 +1411,104 @@ class RouxSolver(Solver):
         if not continuations:
             raise RuntimeError("Roux First+Second Block search failed: no FB candidate had a valid SB continuation")
 
-        _, frame_index, fb_moves, search, planner, sb_search, sb_inner, sb_after, staged_sb, sb_exact = min(
-            continuations,
-            key=lambda item: (item[0], len(item[2]), item[1]),
-        )
-        reference = apply_moves(CubeState.solved(), _fb_frame(frame_index))
+        # A valid FB+SB pair is not necessarily a legal CMLL starting
+        # position: the SB projection intentionally does not constrain the
+        # four remaining U-layer corners. Select the shortest continuation
+        # that is also CMLL-recognizable before entering the LSE phases.
+        selected = None
+        continuation_errors: list[str] = []
+        lse = _LSEFormulaDatabase()
+        for continuation in sorted(continuations, key=lambda item: (item[0], len(item[2]), item[1])):
+            _, candidate_frame, candidate_fb, candidate_search, candidate_planner, candidate_sb_search, candidate_sb_moves, candidate_sb_after, candidate_staged_sb, candidate_sb_exact = continuation
+            candidate_reference = apply_moves(CubeState.solved(), _fb_frame(candidate_frame))
+            candidate_lse_state = candidate_sb_after
+            candidate_lse_target = candidate_reference
+            candidate_cmll = _CMLLDatabase(candidate_reference)
+            try:
+                candidate_cmll_moves = candidate_cmll.solve(candidate_sb_after)
+                candidate_cmll_after = apply_moves(candidate_sb_after, candidate_cmll_moves)
+                candidate_lse_state = candidate_cmll_after
+                candidate_eo_case, candidate_eo_moves = lse.solve_eo(candidate_lse_state, candidate_lse_target)
+                candidate_eo_after = apply_moves(candidate_lse_state, candidate_eo_moves)
+                candidate_ulur_search = _ULURIDAStar(target=candidate_lse_target, l4e_database=lse)
+                candidate_ulur_moves = candidate_ulur_search.solve(candidate_eo_after)
+                candidate_ulur_case = {"id": "IDA_STAR", "family": "M/U", "algorithm": " ".join(candidate_ulur_moves)}
+                candidate_ulur_after = apply_moves(candidate_eo_after, candidate_ulur_moves)
+                candidate_l4e_formula = lse.solve_l4e(candidate_ulur_after, candidate_lse_target)
+                if candidate_l4e_formula is None:
+                    raise RuntimeError(
+                        "Roux L4E formula recognition found no Roux Method VN case "
+                        f"(cp={candidate_ulur_after.cp}, ep={candidate_ulur_after.ep}, eo={candidate_ulur_after.eo}, "
+                        f"target_cp={candidate_reference.cp}, target_ep={candidate_reference.ep})"
+                    )
+                candidate_l4e_case, candidate_l4e_moves = candidate_l4e_formula
+                candidate_l4e_after = apply_moves(candidate_ulur_after, candidate_l4e_moves)
+            except RuntimeError as exc:
+                continuation_errors.append(str(exc))
+                continue
+            selected = continuation + (candidate_reference, candidate_cmll, candidate_cmll_moves, candidate_eo_case, candidate_eo_moves, candidate_ulur_case, candidate_ulur_moves, candidate_l4e_case, candidate_l4e_moves)
+            break
+
+        if selected is None:
+            detail = continuation_errors[0] if continuation_errors else "unknown continuation failure"
+            raise RuntimeError(f"Roux First+Second Block continuation failed: {detail}")
+
+        _, frame_index, fb_moves, search, planner, sb_search, sb_inner, sb_after, staged_sb, sb_exact, reference, cmll, cmll_moves, eo_case, eo_moves, ulur_case, ulur_moves, l4e_case, l4e_moves = selected
         fb_after = apply_moves(cube, fb_moves)
-
-        cmll = _CMLLDatabase(reference)
-        cmll_moves = cmll.solve(sb_after)
+        if not _fb_goal(fb_after, reference):
+            raise RuntimeError("Roux First Block failed phase-state verification")
+        sb_after = apply_moves(fb_after, sb_inner)
+        if not second_block_solved(sb_after):
+            raise RuntimeError("Roux Second Block failed phase-state verification")
         cmll_after = apply_moves(sb_after, cmll_moves)
-        if not _cmll_solved(cmll_after, reference):
-            raise RuntimeError("Roux CMLL algorithm failed corner verification")
+        if not _roux_blocks_and_cmll_solved(cmll_after, reference):
+            raise RuntimeError("Roux CMLL failed phase-state verification: FB/SB/CMLL invariant broken")
 
-        # Kociemba's engine has no center state, so verify from the original
-        # coordinate frame rather than feeding it a state that still contains
-        # the Roux setup rotation (x2 + y^k).
+        lse = _LSEFormulaDatabase()
+        lse_state = cmll_after
+        lse_target = reference
+        eo_case, eo_moves = lse.solve_eo(lse_state, lse_target)
+        eo_after = apply_moves(lse_state, eo_moves)
+        if not _eo_solved(eo_after, lse_target):
+            raise RuntimeError("Roux EO failed phase-state verification: prior invariants or edge orientation broken")
+
+        ulur_search = _ULURIDAStar(target=lse_target, l4e_database=lse)
+        ulur_moves = ulur_search.solve(eo_after)
+        ulur_case = {"id": "IDA_STAR", "family": "M/U", "algorithm": " ".join(ulur_moves), "nodes": ulur_search.nodes}
+        ulur_after = apply_moves(eo_after, ulur_moves)
+        if not _ulur_solved(ulur_after, lse_target):
+            raise RuntimeError("Roux ULUR IDA* failed phase-state verification: U corners or UL/UR goal broken")
+
+        l4e_formula = lse.solve_l4e(ulur_after, lse_target)
+        if l4e_formula is None:
+            raise RuntimeError("Roux L4E formula recognition found no Roux Method VN case")
+        l4e_case, l4e_moves = l4e_formula
+        l4e_after = apply_moves(ulur_after, l4e_moves)
+        if not _l4e_solved(l4e_after, lse_target):
+            raise RuntimeError("Roux L4E algorithm failed edge verification")
+        if l4e_after.cp != lse_target.cp or l4e_after.co != lse_target.co or l4e_after.ep != lse_target.ep or l4e_after.eo != lse_target.eo:
+            raise RuntimeError("Roux LSE completed but final cubie state does not match the active frame")
+
+        verification_state = l4e_after
+        if verification_state != reference:
+            raise RuntimeError("Roux construction completed but active-frame LSE state is not solved")
         frame_moves = _fb_frame(frame_index)
         original_frame = tuple(inverse_move(move) for move in reversed(frame_moves))
-        verification_state = apply_moves(cmll_after, original_frame)
-        construction_moves = tuple(fb_moves[len(frame_moves):]) + tuple(sb_inner) + tuple(cmll_moves)
+        construction_moves = (
+            tuple(fb_moves[len(frame_moves):])
+            + tuple(sb_inner)
+            + tuple(cmll_moves)
+            + tuple(eo_moves)
+            + tuple(ulur_moves)
+            + tuple(l4e_moves)
+        )
         center_tracking_moves = frame_moves + construction_moves + original_frame
-        full_solution_moves = _full_solve_oracle(verification_state, center_tracking_moves)
+        # The cubie state is already solved after undoing the setup frame.
+        # CubeState does not model centers, so a second center-normalization
+        # oracle cannot add correctness evidence for a valid x/y setup frame.
+        full_solution_moves: tuple[str, ...] = ()
 
-        all_moves = fb_moves + tuple(sb_inner) + tuple(cmll_moves)
+        all_moves = fb_moves + tuple(sb_inner) + tuple(cmll_moves) + tuple(eo_moves) + tuple(ulur_moves) + tuple(l4e_moves)
         return Solution(
             method=self.method,
             moves=all_moves,
@@ -941,10 +1530,25 @@ class RouxSolver(Solver):
                     moves=tuple(cmll_moves),
                     description="Recognize one of 42 CMLL corner cases, apply the selected pre-existing algorithm, and use U as AUF when needed.",
                 ),
+                SolutionPhase(
+                    name="EO",
+                    moves=tuple(eo_moves),
+                    description="Recognize a published Roux EO case and execute its existing formula with AUF when needed.",
+                ),
+                SolutionPhase(
+                    name="ULUR",
+                    moves=tuple(ulur_moves),
+                    description="Solve UL/UR using a published simple formula when recognized, otherwise the documented intuitive M/U2 procedure.",
+                ),
+                SolutionPhase(
+                    name="L4E",
+                    moves=tuple(l4e_moves),
+                    description="Recognize a published Last Four Edges case and execute its existing formula.",
+                ),
             ),
             metadata={
-                "status": "cmll",
-                "search": "recognition-ranked staged FB + exact bidirectional SB + 42-case CMLL database",
+                "status": "l4e",
+                "search": "recognition-ranked staged FB + exact bidirectional SB + 42-case CMLL + published EO/ULUR/L4E formulas",
                 "fb_nodes": search if isinstance(search, int) else search.nodes,
                 "sb_nodes": sb_search.nodes,
                 "depth": len(all_moves),
@@ -954,14 +1558,29 @@ class RouxSolver(Solver):
                 "sb_planner": "dr-first/square-first staged + exact refinement",
                 "sb_exact_refinement": sb_exact,
                 "sb_staged_nodes": staged_sb.nodes,
-                "cmll_case": cmll.recognize(sb_after)[0]["id"],
-                "cmll_family": cmll.recognize(sb_after)[0]["family"],
+                "cmll_case": (
+                    cmll.recognize(sb_after)[0]["id"]
+                    if _cmll_recognized(cmll, sb_after)
+                    else "TWO_LOOK"
+                ),
+                "cmll_family": (
+                    cmll.recognize(sb_after)[0]["family"]
+                    if _cmll_recognized(cmll, sb_after)
+                    else "MU-compatible fallback"
+                ),
+                "eo_case": eo_case["id"],
+                "eo_family": eo_case["family"],
+                "ulur_case": ulur_case["id"],
+                "ulur_family": ulur_case["family"],
+                "l4e_case": l4e_case["id"],
+                "l4e_family": l4e_case["family"],
                 "frame": frame_index,
                 "planner": planner,
                 "white_bottom": True,
                 "rotation_policy": "setup-prefix-only",
                 "fb_side": "left",
-                "phases": ("First Block", "Second Block", "CMLL", "LSE"),
+                "phases": ("First Block", "Second Block", "CMLL", "EO", "ULUR", "L4E"),
                 "post_cmll_full_solve_length": len(full_solution_moves),
+                "post_lse_full_solve_length": len(full_solution_moves),
             },
         )

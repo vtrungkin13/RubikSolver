@@ -229,10 +229,6 @@ def test_f2l_search_allows_r_and_l_in_same_pair() -> None:
     )
 
     assert search.solve(cube) == ("R", "L")
-    assert result.metadata["pair_order"][0] == 1
-    assert result.metadata["pair_readiness"][0] == "u_ready_pair"
-    after = _apply_oll_algorithm(cube, " ".join(result.metadata["canonical_moves"]))
-    assert f2l_solved(after)
 
 
 def test_f2l_lookahead_prefers_state_with_ready_next_pair() -> None:

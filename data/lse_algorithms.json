@@ -1,0 +1,45 @@
+{
+  "eo": [
+    {"id":"3_1_F","family":"3/1","algorithm":"M' U' M'"},
+    {"id":"3_1_B","family":"3/1","algorithm":"M U' M'"},
+    {"id":"1_1_F","family":"1/1","algorithm":"M' U' M U'"},
+    {"id":"1_1_B","family":"1/1","algorithm":"M' U' M' U'"},
+    {"id":"0_2","family":"0/2","algorithm":"M' U' M' U"},
+    {"id":"2o_0","family":"2o/0","algorithm":"M' U M U'"},
+    {"id":"4_0","family":"4/0","algorithm":"M' U2 M' U2"},
+    {"id":"2a_0","family":"2a/0","algorithm":"M' U M' U2"},
+    {"id":"2a_2","family":"2a/2","algorithm":"M2 U'"},
+    {"id":"2o_2","family":"2o/2","algorithm":"M U2 M' U2"},
+    {"id":"4_2","family":"4/2","algorithm":"R U' r' U' M' U r U r'"}
+  ],
+  "ulur": [
+    {"id":"ULUR_1","family":"simple","algorithm":"U' M U2 M"},
+    {"id":"ULUR_2","family":"simple","algorithm":"U' M' U2 M"},
+    {"id":"ULUR_3","family":"simple","algorithm":"U2 M' U2 M' U M2"}
+  ],
+  "l4e": [
+    {"id":"L4E_VN_W1","family":"roux_method_vn_white","algorithm":"U2 M U2 M'"},
+    {"id":"L4E_VN_W2","family":"roux_method_vn_white","algorithm":"M' U2 M' U2 M2"},
+    {"id":"L4E_VN_W3","family":"roux_method_vn_white","algorithm":"U2 M' U2 M"},
+    {"id":"L4E_VN_W4","family":"roux_method_vn_white","algorithm":"M U2 M' U2"},
+    {"id":"L4E_VN_W5","family":"roux_method_vn_white","algorithm":"M2 U2 M U2 M"},
+    {"id":"L4E_VN_W6","family":"roux_method_vn_white","algorithm":"M' U2 M U2"},
+    {"id":"L4E_VN_W7","family":"roux_method_vn_white","algorithm":"M2 U2 M' U2 M'"},
+    {"id":"L4E_VN_W8","family":"roux_method_vn_white","algorithm":"M U2 M U2 M2"},
+    {"id":"L4E_VN_C1","family":"roux_method_vn_white_center","algorithm":"U2 M' U2 M'"},
+    {"id":"L4E_VN_C2","family":"roux_method_vn_white_center","algorithm":"M U2 M' U2 M2"},
+    {"id":"L4E_VN_C3","family":"roux_method_vn_white_center","algorithm":"M U2 M U2"},
+    {"id":"L4E_VN_C4","family":"roux_method_vn_white_center","algorithm":"M2 U2 M' U2 M"},
+    {"id":"L4E_VN_C5","family":"roux_method_vn_white_center","algorithm":"U2 M U2 M"},
+    {"id":"L4E_VN_C6","family":"roux_method_vn_white_center","algorithm":"M' U2 M' U2"},
+    {"id":"L4E_VN_C7","family":"roux_method_vn_white_center","algorithm":"M' U2 M U2 M2"},
+    {"id":"L4E_VN_C8","family":"roux_method_vn_white_center","algorithm":"M2 U2 M U2 M'"},
+    {"id":"L4E_VN_S1","family":"roux_method_vn_special","algorithm":"M U2 M2 U2 M'"},
+    {"id":"L4E_VN_S2","family":"roux_method_vn_special","algorithm":"M' U2 M2 U2 M'"},
+    {"id":"L4E_VN_S3","family":"roux_method_vn_special","algorithm":"E2 M E2 M"},
+    {"id":"L4E_VN_S4","family":"roux_method_vn_special","algorithm":"U2 M' U2 M2 U2 M' U2"},
+    {"id":"L4E_VN_S5","family":"roux_method_vn_special","algorithm":"E2 M E2 M'"},
+    {"id":"L4E_VN_S6","family":"roux_method_vn_special","algorithm":"U2 M' U2 M2 U2 M' U2 M2"},
+    {"id":"L4E_VN_S7","family":"roux_method_vn_special","algorithm":"U2 M2 U2 M2"}
+  ]
+}

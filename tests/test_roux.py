@@ -1,4 +1,4 @@
-from rubik_solver.cube.moves import apply_moves
+from rubik_solver.cube.moves import apply_moves, inverse_move
 from rubik_solver.cube.parser import parse_scramble
 from rubik_solver.cube.state import CubeState
 from rubik_solver.solvers.roux import (
@@ -7,12 +7,93 @@ from rubik_solver.solvers.roux import (
     _cmll_inverse,
     _cmll_u_turn,
     _cmll_solved,
+    _eo_solved,
+    _fb_goal,
+    _LSEFormulaDatabase,
+    _l4e_solved,
+    _ulur_solved,
     RouxSolver,
     _SecondBlockSearch,
     _fb_frame,
     first_block_solved,
     second_block_solved,
 )
+
+
+def test_cmll_database_recognizes_all_42_generated_cases() -> None:
+    import json
+    from pathlib import Path
+
+    db_path = Path(__file__).parents[1] / "data" / "cmll_algorithms.json"
+    entries = json.loads(db_path.read_text(encoding="utf-8"))
+    target = CubeState.solved()
+    database = _CMLLDatabase(target)
+    for entry in entries:
+        algorithm = tuple(entry["algorithm"].split())
+        case = apply_moves(target, tuple(inverse_move(move) for move in reversed(algorithm)))
+        recognized, _ = database.recognize(case)
+        assert recognized["id"] == entry["id"]
+
+
+def test_l4e_roux_method_vn_table_recognizes_all_cube_state_cases() -> None:
+    import json
+    from pathlib import Path
+
+    db_path = Path(__file__).parents[1] / "data" / "lse_algorithms.json"
+    entries = json.loads(db_path.read_text(encoding="utf-8"))["l4e"]
+    target = CubeState.solved()
+    database = _LSEFormulaDatabase()
+    seen = set()
+    cases = []
+
+    for entry in entries:
+        if not entry["id"].startswith("L4E_VN_"):
+            continue
+        algorithm = tuple(entry["algorithm"].split())
+        case = apply_moves(target, _cmll_inverse(algorithm))
+        signature = tuple(case.ep.index(target.ep[pos]) for pos in (1, 3, 5, 7))
+        if signature in seen:
+            continue
+        seen.add(signature)
+        cases.append(case)
+
+    assert len(cases) == 12
+    for case in cases:
+        recognized = database.solve_l4e(case, target)
+        assert recognized is not None
+        _, moves = recognized
+        solved = apply_moves(case, moves)
+        assert _l4e_solved(solved, target)
+
+
+def test_roux_end_to_end_short_scramble() -> None:
+    cube = apply_moves(CubeState.solved(), parse_scramble("R U"))
+    result = RouxSolver(sb_max_depth=14, sb_timeout_seconds=15).solve(cube)
+    assert result.verified is True
+    frame_len = len(_fb_frame(result.metadata["frame"]))
+    framed_after = apply_moves(cube, result.moves)
+    normalized = apply_moves(framed_after, tuple(inverse_move(move) for move in reversed(result.moves[:frame_len])))
+    assert normalized.is_solved()
+
+
+def test_roux_end_to_end_deterministic_scrambles() -> None:
+    scrambles = (
+        "R U R' F2 D",
+        "F R U' L B2 D",
+        "R2 U2 F' L2 D B R2",
+        "U R L U' R' D' F' D2",
+        "D U L2 R2 U B2 L2 F",
+        "R B2 U' F L' D2 R U2",
+        "F2 U R2 B' L D' F R'",
+        "L U2 B R' F2 D L2 U'",
+    )
+    for scramble in scrambles:
+        cube = scrambled(scramble)
+        result = RouxSolver(fb_timeout_seconds=15, sb_timeout_seconds=15).solve(cube)
+        assert result.verified is True, scramble
+        frame = _fb_frame(result.metadata["frame"])
+        normalized = apply_moves(apply_moves(cube, result.moves), tuple(inverse_move(move) for move in reversed(frame)))
+        assert normalized.is_solved(), scramble
 
 
 def test_cmll_database_has_42_unique_auf_equivalence_classes() -> None:
@@ -83,7 +164,7 @@ def test_first_block_solves_short_scrambles() -> None:
         assert result.verified is True
         assert first_block_solved(after)
         assert result.phases[0].name == "First Block"
-        assert result.metadata["status"] == "cmll"
+        assert result.metadata["status"] == "l4e"
         assert result.metadata["white_bottom"] is True
         assert result.metadata["rotation_policy"] == "setup-prefix-only"
         assert result.metadata["fb_side"] == "left"
@@ -147,3 +228,29 @@ def test_second_block_exact_search_is_exact_for_all_one_move_cases() -> None:
         result = search.solve(cube)
         assert len(result) == expected_length
         assert search._goal(apply_moves(cube, result))
+
+
+def test_roux_phase_boundaries_are_verified_end_to_end() -> None:
+    cube = scrambled("R U R' F2 D")
+    result = RouxSolver(fb_timeout_seconds=15, sb_timeout_seconds=15).solve(cube)
+    frame = _fb_frame(result.metadata["frame"])
+    reference = apply_moves(CubeState.solved(), frame)
+
+    state = cube
+    phase_states = {}
+    for phase in result.phases[:3]:
+        state = apply_moves(state, phase.moves)
+        phase_states[phase.name] = state
+
+    lse_state = phase_states["CMLL"]
+    lse_phase_states = {}
+    for phase in result.phases[3:]:
+        lse_state = apply_moves(lse_state, phase.moves)
+        lse_phase_states[phase.name] = lse_state
+
+    assert _fb_goal(phase_states["First Block"], reference)
+    assert second_block_solved(phase_states["Second Block"])
+    assert _cmll_solved(phase_states["CMLL"], reference)
+    assert _eo_solved(lse_phase_states["EO"], reference)
+    assert _ulur_solved(lse_phase_states["ULUR"], reference)
+    assert _l4e_solved(lse_phase_states["L4E"], reference)
