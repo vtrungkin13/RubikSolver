@@ -678,18 +678,35 @@ Sau khi FB đã được chốt, SB là một phase độc lập nhưng có th�
 1. Nhận diện `FREE_SQUARE` / `FREE_PAIR` hoặc cơ hội dễ khai thác nếu state đã
    chứa sẵn một phần SB.
 2. Nếu không có cơ hội rõ ràng, dùng DR-first nhưng không greedy theo DR ngắn
-   nhất; phải xét ảnh hưởng của DR lên hai pair còn lại và thứ tự pair tiếp theo.
-3. Chỉ khi human-style planner không tìm được continuation hợp lệ mới dùng
+   nhất; phải xét ảnh hưởng của DR lên **cả FR và BR**.
+3. Thứ tự ghép `FR_FIRST` / `BR_FIRST` không được cố định. Với cùng một state,
+   planner phải đánh giá cả hai hướng; sau khi ghép pair đầu, phải re-analyze
+   pair còn lại từ state mới và ưu tiên hướng có lookahead tốt, dễ solve hơn,
+   dễ nhận diện hơn hoặc có ergonomics tốt hơn.
+4. Không được coi `FR_FIRST` là mặc định chỉ vì FR được đánh giá trước trong
+   code. `BR_FIRST` có thể thắng hoàn toàn nếu để lại continuation tốt hơn.
+5. Chỉ khi human-style planner không tìm được continuation hợp lệ mới dùng
    direct SB search như **emergency/oracle fallback**.
-4. Direct fallback không được quay ngược để thay thế một human-style plan hợp
+6. Direct fallback không được quay ngược để thay thế một human-style plan hợp
    lệ chỉ vì nó ngắn hơn. Nếu fallback được dùng, metadata phải nói rõ đây là
    fallback để phục vụ học tập/debugging.
 
 Direct SB hiện có mục tiêu correctness và oracle/debugging hơn là strategy chính.
-Mặc định fallback được phép tìm tới 14 HTM moves với node limit riêng; giới hạn
-thời gian vẫn được áp dụng. Human-style SB planner và direct fallback cùng tôn
-trọng resource budget do caller cấu hình; không có cap thời gian nội bộ thấp hơn
-budget đó.
+
+Human-style SB planner **không có giới hạn HTM cố định**. DR construction, pair
+construction và pair-order lookahead được phép đi sâu hơn 14 moves nếu đó là cách
+tạo ra một SB plan tốt, dễ hiểu và human-like hơn. Planner chỉ bị giới hạn bởi
+resource budget do caller cấu hình (timeout/node budget), không bởi một cap move
+count dùng chung với direct search.
+
+Pair-order evaluation phải giữ được tính giải thích: metadata cần cho biết cả hai
+hướng đã được xem xét, heuristic của pair còn lại sau pair đầu, và hướng cuối cùng
+được chọn. Đây là lookahead **nội bộ SB**, không phải lý do để thay đổi FB đã chốt.
+Direct SB fallback vẫn giữ giới hạn **14 HTM moves** và node limit riêng; đây là
+giới hạn correctness/oracle có chủ đích, không phải giới hạn của human-style
+planner. Human-style SB planner và direct fallback có thể dùng cùng resource
+budget do caller cấu hình, nhưng move-depth policy của hai lớp phải được tách
+biệt rõ ràng.
 
 ### Future CFOP learning-oriented design
 
@@ -733,3 +750,16 @@ M7: Optimal solver
 M8: Web UI
 
 Mỗi milestone phải có automated tests và verification trước khi chuyển sang milestone tiếp theo.
+
+
+## Current Roux design decisions ? 2026-10-04
+
+- RubikSolver is a learning-oriented solver: solutions should expose human-style decisions, phase boundaries, and explainable metadata, not only valid/short sequences.
+- `CubeState` stores the full six-center permutation (`U,R,F,D,L,B`) alongside cubies. Extended moves (`M`, `r`, `u`, `x/y/z`) must update centers using the same convention as the Kociemba engine; Roux FB must not ban useful center-moving moves merely because centers were previously absent from the state.
+- FB and SB are hard phase boundaries. FB is selected by the FB objective only; SB continuation must never reopen or change the chosen FB.
+- SB normally uses `U/R/M/r`. Exceptional moves are scored ergonomically: `F=2`, `L=4`, `B=6`, `D=6`; `B` and `D` intentionally share the highest penalty tier.
+- Exceptional moves are currently opened mainly for final FR insertion. Intermediate DR/pair construction keeps the stable core move flow.
+- The final SB move is restricted to `R/R2/R'` or `r/r2/r'`.
+- `CornerOrientationAnalyzer` is applied only when the final SB pair is FR. It analyzes U-layer corner orientation and CMLL difficulty; it is explicitly not used for BR final pairs because rear-face lookahead is ergonomically expensive and `B` is heavily penalized.
+- Before EO, white/yellow centers must be on U/D. When possible, final `R`/`R'` is rewritten to `r`/`r'` to perform the EO center handoff without an extra `M`/`M'`.
+- Do not automatically commit changes. Only create a commit when the user explicitly requests it.

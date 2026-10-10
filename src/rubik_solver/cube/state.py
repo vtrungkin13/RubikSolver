@@ -14,10 +14,20 @@ class CubeState:
     co: tuple[int, ...] = (0,) * 8
     ep: tuple[int, ...] = tuple(range(12))
     eo: tuple[int, ...] = (0,) * 12
+    # Center permutation uses the same face order as the Kociemba engine:
+    # U, R, F, D, L, B. Face turns keep this permutation unchanged; slice,
+    # wide, and whole-cube rotations update it.
+    center: tuple[int, ...] = tuple(range(6))
 
     @classmethod
     def solved(cls) -> "CubeState":
         return cls()
 
     def is_solved(self) -> bool:
-        return self.cp == tuple(range(8)) and self.co == (0,) * 8 and self.ep == tuple(range(12)) and self.eo == (0,) * 12
+        return (
+            self.cp == tuple(range(8))
+            and self.co == (0,) * 8
+            and self.ep == tuple(range(12))
+            and self.eo == (0,) * 12
+            and self.center == tuple(range(6))
+        )

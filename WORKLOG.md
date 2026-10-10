@@ -1,3 +1,37 @@
+### 2026-10-05 - Center-aware CubeState and Roux FB r/M/u support
+
+- Extended `CubeState` with `center: tuple[int, ...]` using the Kociemba engine's `U,R,F,D,L,B` convention.
+- Updated ordinary move composition and extended-move execution so `x/y/z`, `M`, `r`, `u`, etc. preserve the exact center permutation.
+- Restored `_FB_MOVES = _ROUX_MOVES`; First Block may now use `r/M/u` instead of banning them because the state model is center-aware.
+- FB validity now requires both the target FB cubies and the exact center frame. This rejects the old `x2 F R L2 u' L F L` candidate for the reported scramble even though its FB cubies are correct.
+- SB tracks center permutations but its phase goal is intentionally weaker: the U/D center positions must contain white/yellow before EO; LSE then preserves/restores the active center frame through EO/ULUR/L4E.
+- Made LSE search/verification center-aware so formula-driven EO/ULUR/L4E cannot silently finish with a cubie-correct but center-wrong state.
+- Updated CFOP engine conversion helpers and Roux derived target states to preserve centers.
+- Updated the regression test to explicitly document the old center-misaligned FB and require the new solver to return a center-valid FB.
+- Focused phase-boundary regression: `1 passed`; additional center-state smoke checks confirm `r`/`u`/`x2` permutations and fourfold `r` identity.
+- Changes are not committed; commit only when explicitly requested.
+
+### 2026-10-05 - Roux FB physical-execution regression / exact-frame verification
+
+- Reproduced the reported scramble: `F2 L2 B2 F2 U R2 D2 L2 U2 F2 R2 F' U' L' D2 R U R U' F2 L`.
+- The returned FB `x2 F R L2 u' L F L` is valid in the cube-state model, but it is easy to execute incorrectly by hand because `x2` is a setup rotation and `u'` is a wide turn.
+- Added `first_block_solved(cube, frame_index=...)` so solver-side FB verification can require the exact selected frame instead of accepting any of the four white-bottom frames.
+- Added explicit metadata: `fb_setup_moves`, `fb_construction_moves`, `fb_execution_order`.
+- Clarified the First Block phase description: physically execute the setup rotation first, then the construction moves; wide turns are literal wide-layer turns.
+- Added a regression test for the exact scramble and active-frame invariant. Targeted regression: `2 passed`.
+- For the same scramble, a standard-face-only control FB also exists: `x2 U' R' U2 B2 D' L D' F'` (9 moves including setup), which avoids `u'` and is useful for isolating manual-notation issues.
+- This workaround is superseded by the 2026-10-05 center-state refactor below: `CubeState` now stores center permutation, so FB can legitimately use `r/M/u` while still verifying the physical center frame.
+- Re-solving the exact regression now returns the center-aligned `x2 U' R' U2 B2 D' L D' F'` FB.
+- Changes are not committed; commit only when explicitly requested.
+
+### 2026-10-05 - Roux SB human-style depth policy
+
+- Removed the fixed 14-HTM ceiling from human-style `_StagedSBSearch`; its stages may go deeper when the DR-first / pair-by-pair plan is cleaner and more human-like, still guarded by node/time budgets.
+- `RouxSolver(sb_max_depth=14)` now applies the 14-move limit only to the direct SB oracle fallback.
+- Preserved the hard FB/SB boundary: direct SB depth policy must never influence which FB is selected.
+- Regression after the refactor: `22 passed`.
+- Changes are not committed; commit only when explicitly requested.
+
 ### 2026-10-04 - Roux SB three-phase DR candidate + pair-order planner
 
 - Implemented the requested full three-phase SB improvement after fixed FB.
@@ -1702,7 +1736,7 @@ Full suite: 77 passed in 14.25s
 - Reworked ULUR/L4E fallback to exact MU-only projected-state searches over the six Roux LSE edges plus U-corner state.
 - Relaxed ULUR's goal to the actual Roux contract: UL/UR are moved into the D pair positions; their orientation/permutation can then be completed by L4E.
 - Fixed setup-frame verification: x/y setup rotations are coordinate operations, so the solved cubie state is verified after normalizing the setup frame.
-- Removed the redundant center-normalization oracle from the final success path because the cube model does not model centers and the cubie state is already verified solved.
+- Superseded: final verification is now center-aware because `CubeState` explicitly stores the six-center permutation.
 
 **Verification:**
 - Roux suite: 13 passed in 185.76s.

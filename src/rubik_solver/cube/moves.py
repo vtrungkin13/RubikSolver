@@ -21,17 +21,26 @@ class MoveDefinition:
     co: tuple[int, ...]
     ep: tuple[int, ...]
     eo: tuple[int, ...]
+    center: tuple[int, ...]
 
 
 # Standard cubie move tables used by Kociemba-style representations.
+_IDENTITY_CENTER = tuple(range(6))
+
+# Center permutations follow the Kociemba engine's convention. Ordinary face
+# turns rotate a face around its own center, so their center permutation is the
+# identity. Slice/wide/whole-cube moves are handled through the extended-move
+# engine path below, where the same center model is preserved exactly.
+
 _BASE_MOVES = {
-    Face.U: MoveDefinition((3,0,1,2,4,5,6,7), (0,)*8, (3,0,1,2,4,5,6,7,8,9,10,11), (0,)*12),
-    Face.R: MoveDefinition((4,1,2,0,7,5,6,3), (2,0,0,1,1,0,0,2), (8,1,2,3,11,5,6,7,4,9,10,0), (0,)*12),
-    Face.F: MoveDefinition((1,5,2,3,0,4,6,7), (1,2,0,0,2,1,0,0), (0,9,2,3,4,8,6,7,1,5,10,11), (0,1,0,0,0,1,0,0,1,1,0,0)),
-    Face.D: MoveDefinition((0,1,2,3,5,6,7,4), (0,)*8, (0,1,2,3,5,6,7,4,8,9,10,11), (0,)*12),
-    Face.L: MoveDefinition((0,2,6,3,4,1,5,7), (0,1,2,0,0,2,1,0), (0,1,10,3,4,5,9,7,8,2,6,11), (0,)*12),
-    Face.B: MoveDefinition((0,1,3,7,4,5,2,6), (0,0,1,2,0,0,2,1), (0,1,2,11,4,5,6,10,8,9,3,7), (0,0,0,1,0,0,0,1,0,0,1,1)),
+    Face.U: MoveDefinition((3,0,1,2,4,5,6,7), (0,)*8, (3,0,1,2,4,5,6,7,8,9,10,11), (0,)*12, _IDENTITY_CENTER),
+    Face.R: MoveDefinition((4,1,2,0,7,5,6,3), (2,0,0,1,1,0,0,2), (8,1,2,3,11,5,6,7,4,9,10,0), (0,)*12, _IDENTITY_CENTER),
+    Face.F: MoveDefinition((1,5,2,3,0,4,6,7), (1,2,0,0,2,1,0,0), (0,9,2,3,4,8,6,7,1,5,10,11), (0,1,0,0,0,1,0,0,1,1,0,0), _IDENTITY_CENTER),
+    Face.D: MoveDefinition((0,1,2,3,5,6,7,4), (0,)*8, (0,1,2,3,5,6,7,4,8,9,10,11), (0,)*12, _IDENTITY_CENTER),
+    Face.L: MoveDefinition((0,2,6,3,4,1,5,7), (0,1,2,0,0,2,1,0), (0,1,10,3,4,5,9,7,8,2,6,11), (0,)*12, _IDENTITY_CENTER),
+    Face.B: MoveDefinition((0,1,3,7,4,5,2,6), (0,0,1,2,0,0,2,1), (0,1,2,11,4,5,6,10,8,9,3,7), (0,0,0,1,0,0,0,1,0,0,1,1), _IDENTITY_CENTER),
 }
+
 
 
 def _compose(a: MoveDefinition, b: MoveDefinition) -> MoveDefinition:
@@ -40,11 +49,14 @@ def _compose(a: MoveDefinition, b: MoveDefinition) -> MoveDefinition:
         tuple((a.co[b.cp[i]] + b.co[i]) % 3 for i in range(8)),
         tuple(a.ep[b.ep[i]] for i in range(12)),
         tuple((a.eo[b.ep[i]] + b.eo[i]) % 2 for i in range(12)),
+        tuple(a.center[b.center[i]] for i in range(6)),
     )
 
 
 def _power(base: MoveDefinition, count: int) -> MoveDefinition:
-    result = MoveDefinition(tuple(range(8)), (0,)*8, tuple(range(12)), (0,)*12)
+    result = MoveDefinition(
+        tuple(range(8)), (0,)*8, tuple(range(12)), (0,)*12, _IDENTITY_CENTER
+    )
     for _ in range(count):
         result = _compose(result, base)
     return result
@@ -70,6 +82,7 @@ def _apply_extended_moves(cube: CubeState, moves: tuple[str, ...]) -> CubeState:
 
     init_kociemba_engine()
     engine_cube = EngineCube()
+    engine_cube.center[:] = cube.center
     engine_cube.cp[:] = cube.cp
     engine_cube.co[:] = cube.co
     engine_cube.ep[:] = cube.ep
@@ -80,6 +93,7 @@ def _apply_extended_moves(cube: CubeState, moves: tuple[str, ...]) -> CubeState:
         co=tuple(engine_cube.co),
         ep=tuple(engine_cube.ep),
         eo=tuple(engine_cube.eo),
+        center=tuple(engine_cube.center),
     )
 
 
@@ -94,6 +108,7 @@ def apply_move(cube: CubeState, move: str) -> CubeState:
         co=tuple((cube.co[definition.cp[i]] + definition.co[i]) % 3 for i in range(8)),
         ep=tuple(cube.ep[definition.ep[i]] for i in range(12)),
         eo=tuple((cube.eo[definition.ep[i]] + definition.eo[i]) % 2 for i in range(12)),
+        center=tuple(cube.center[definition.center[i]] for i in range(6)),
     )
 
 

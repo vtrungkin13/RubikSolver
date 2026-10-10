@@ -25,6 +25,7 @@ class KociembaSolver(Solver):
     @staticmethod
     def _to_engine_cube(cube: CubeState) -> EngineCube:
         result = EngineCube()
+        result.center[:] = cube.center
         result.cp[:] = cube.cp
         result.co[:] = cube.co
         result.ep[:] = cube.ep
@@ -37,7 +38,12 @@ class KociembaSolver(Solver):
 
         self._ensure_initialized()
         engine_cube = self._to_engine_cube(cube)
+        center_rotation = engine_cube.upright()
+        if center_rotation:
+            engine_cube.move(center_rotation)
         sequence = engine_solve(engine_cube)
+        if center_rotation:
+            sequence = f"{center_rotation} {sequence}"
         if not sequence:
             raise RuntimeError("Kociemba did not return a solution.")
 

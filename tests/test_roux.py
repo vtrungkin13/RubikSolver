@@ -3,22 +3,37 @@ from rubik_solver.cube.parser import parse_scramble
 from rubik_solver.cube.state import CubeState
 from rubik_solver.solvers.roux import (
     _CMLLDatabase,
+    CornerOrientationAnalyzer,
+    _SB_MOVE_PENALTY,
     _CMLL_CORNER_GOALS,
     _cmll_inverse,
     _cmll_u_turn,
     _cmll_solved,
     _eo_solved,
     _fb_goal,
+    _fb_cubies_goal,
+    _centers_ready_for_eo_state,
     _LSEFormulaDatabase,
     _l4e_solved,
     _ulur_solved,
     RouxSolver,
     _SecondBlockSearch,
+    _optimize_sb_final_move_for_eo,
+    _centers_ready_for_eo,
     _SBOpportunityDetector,
     _fb_frame,
     first_block_solved,
     second_block_solved,
 )
+
+
+def test_cube_state_tracks_centers_for_extended_roux_moves() -> None:
+    solved = CubeState.solved()
+    assert apply_moves(solved, ("x2",)).center == (3, 1, 5, 0, 4, 2)
+    assert apply_moves(solved, ("u",)).center == (0, 5, 1, 3, 2, 4)
+    assert apply_moves(solved, ("r",)).center == (2, 1, 3, 5, 4, 0)
+    assert apply_moves(solved, ("M",)).center == (5, 1, 0, 2, 4, 3)
+    assert apply_moves(solved, ("r", "r", "r", "r")).is_solved()
 
 
 def test_cmll_database_recognizes_all_42_generated_cases() -> None:
@@ -95,6 +110,21 @@ def test_roux_end_to_end_deterministic_scrambles() -> None:
         assert normalized.is_solved(), scramble
 
 
+def test_regression_scramble_fb_uses_exact_active_frame() -> None:
+    scramble = "F2 L2 B2 F2 U R2 D2 L2 U2 F2 R2 F' U' L' D2 R U R U' F2 L"
+    cube = scrambled(scramble)
+    result = RouxSolver(fb_timeout_seconds=15, sb_timeout_seconds=15).solve(cube)
+
+    frame = _fb_frame(result.metadata["frame"])
+    fb_moves = result.phases[0].moves
+    fb_after = apply_moves(cube, fb_moves)
+
+    assert result.metadata["fb_setup_moves"] == frame
+    assert result.metadata["fb_construction_moves"] == fb_moves[len(frame):]
+    assert result.metadata["fb_execution_order"] == "setup_rotation_then_construction"
+    assert first_block_solved(fb_after, result.metadata["frame"])
+
+
 def test_roux_phase_boundary_hard_sb_case_does_not_reopen_fb() -> None:
     """The optimized FB remains fixed even when SB cannot finish in-budget."""
     for scramble in (
@@ -148,6 +178,49 @@ def test_all_42_cmll_cases_recognize_and_solve() -> None:
             assert solved.eo[pos] == target.eo[pos]
 
 
+def test_corner_orientation_analyzer_reports_cmll_case() -> None:
+    target = CubeState.solved()
+    db = _CMLLDatabase(target)
+    analyzer = CornerOrientationAnalyzer(target, db)
+    entry = db.entries[0]
+    case = apply_moves(target, _cmll_inverse(tuple(entry["algorithm"].split())))
+    analysis = analyzer.analyze(case)
+    assert analysis["case_id"] == entry["id"]
+    assert len(analysis["orientation"]) == 4
+    assert analysis["score"] == (
+        analysis["misoriented_corners"],
+        analysis["cmll_algorithm_length"],
+        analysis["auf_length"],
+    )
+
+
+def test_sb_penalty_policy_matches_ergonomic_tiers() -> None:
+    assert _SB_MOVE_PENALTY["U"] == 0
+    assert _SB_MOVE_PENALTY["R"] == 0
+    assert _SB_MOVE_PENALTY["M"] == 0
+    assert _SB_MOVE_PENALTY["r"] == 0
+    assert _SB_MOVE_PENALTY["F"] < _SB_MOVE_PENALTY["L"]
+    assert _SB_MOVE_PENALTY["B"] == _SB_MOVE_PENALTY["D"]
+    assert _SB_MOVE_PENALTY["B"] > _SB_MOVE_PENALTY["L"]
+
+
+def test_sb_final_r_eo_optimizer_is_center_aware() -> None:
+    target = CubeState.solved()
+    cube = apply_moves(target, ("R'",))
+    optimized, metadata = _optimize_sb_final_move_for_eo(cube, target, ("R",))
+    assert _centers_ready_for_eo(("R",))
+    assert optimized == ("R",)
+    assert metadata["applied"] is False
+
+
+def test_corner_orientation_analyzer_is_disabled_for_br_final_pair() -> None:
+    result = RouxSolver(fb_timeout_seconds=15, sb_timeout_seconds=15).solve(
+        scrambled("R U R' F2 D")
+    )
+    if result.metadata["sb_pair_order"] == "BR_FIRST":
+        assert result.metadata["sb_corner_orientation"] is None
+
+
 def test_all_42_cmll_cases_support_all_auf_rotations() -> None:
     target = CubeState.solved()
     db = _CMLLDatabase(target)
@@ -197,6 +270,7 @@ def test_first_block_solves_short_scrambles() -> None:
         assert_rotation_prefix_only(result.moves)
         assert result.phases[1].name == "Second Block"
         assert result.phases[2].name == "CMLL"
+        assert "sb_pair_order_evaluations" in result.metadata
         after_sb = apply_moves(cube, result.moves)
         assert second_block_solved(after_sb)
 
@@ -280,3 +354,19 @@ def test_roux_phase_boundaries_are_verified_end_to_end() -> None:
     assert _eo_solved(lse_phase_states["EO"], reference)
     assert _ulur_solved(lse_phase_states["ULUR"], reference)
     assert _l4e_solved(lse_phase_states["L4E"], reference)
+
+
+def test_reported_scramble_rejects_center_misaligned_old_fb() -> None:
+    scramble = "F2 L2 B2 F2 U R2 D2 L2 U2 F2 R2 F' U' L' D2 R U R U' F2 L"
+    cube = scrambled(scramble)
+    frame = _fb_frame(0)
+    reference = apply_moves(CubeState.solved(), frame)
+    old_fb = frame + ("F", "R", "L2", "u'", "L", "F", "L")
+    after_fb = apply_moves(cube, old_fb)
+
+    assert _fb_cubies_goal(after_fb, reference)
+    assert not _fb_goal(after_fb, reference)
+    assert after_fb.center != reference.center
+
+    center_valid_control = frame + ("U'", "R'", "U2", "B2", "D'", "L", "D'", "F'")
+    assert _fb_goal(apply_moves(cube, center_valid_control), reference)

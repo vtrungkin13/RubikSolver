@@ -36,6 +36,7 @@ def _to_x2_coordinate_frame(cube: CubeState) -> CubeState:
         co=rotated.co,
         ep=tuple(edge_inverse[piece] for piece in rotated.ep),
         eo=rotated.eo,
+        center=CubeState.solved().center,
     )
 
 
@@ -1018,6 +1019,7 @@ def _ensure_oll_engine() -> None:
 
 def _to_engine_cube(cube: CubeState) -> EngineCube:
     result = EngineCube()
+    result.center[:] = cube.center
     result.cp[:] = cube.cp
     result.co[:] = cube.co
     result.ep[:] = cube.ep
@@ -1031,6 +1033,7 @@ def _from_engine_cube(cube: EngineCube) -> CubeState:
         co=tuple(cube.co),
         ep=tuple(cube.ep),
         eo=tuple(cube.eo),
+        center=tuple(cube.center),
     )
 
 

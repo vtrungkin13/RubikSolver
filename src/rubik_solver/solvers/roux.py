@@ -26,18 +26,33 @@ _ROUX_EXTRA_MOVES = ("r", "r2", "r'", "M", "M2", "M'")
 # too, and treat all of these as normal construction moves (not rotations).
 _ROUX_WIDE_MOVES = ("u", "u2", "u'")
 _ROUX_MOVES = _ALL_MOVES + _ROUX_EXTRA_MOVES + _ROUX_WIDE_MOVES
+# FB construction is center-aware. CubeState now carries the full center
+# permutation, so Roux may use r/M/u during FB exactly like a human would.
+# Candidate validation requires the final centers to match the active FB frame.
+_FB_MOVES = _ROUX_MOVES
 _SB_MOVES = (
     "U", "U2", "U'",
     "R", "R2", "R'",
     "M", "M2", "M'",
     "r", "r2", "r'",
 )
+_SB_EXCEPTIONAL_MOVES = (
+    "F", "F2", "F'",
+    "B", "B2", "B'",
+    "L", "L2", "L'",
+    "D", "D2", "D'",
+)
+_SB_FINAL_MOVES = frozenset({"R", "R2", "R'", "r", "r2", "r'"})
+_SB_MOVE_PENALTY = {
+    **{move: 0 for move in _SB_MOVES},
+    **{move: 2 for move in ("F", "F2", "F'")},
+    **{move: 4 for move in ("L", "L2", "L'")},
+    **{move: 6 for move in ("B", "B2", "B'", "D", "D2", "D'")},
+}
 
 # A Roux FB is a 1x2x3 block on the LEFT. Its bottom must be made from the
-# white stickers, but the white center does not have to be the physical D
-# center. CubeState has no center permutation, so choose a pre-solve frame with
-# x2 (white stickers become D-facing), then one of four y orientations, and
-# solve the canonical LEFT block there: DLF/DBL + DL/FL/BL.
+# white stickers. The active setup frame is represented explicitly, including
+# its center permutation, and FB construction must finish with those centers.
 _FB_CORNER_GOALS = (5, 6)  # DLF, DBL
 _FB_EDGE_GOALS = (6, 9, 10)  # DL, FL, BL
 _SB_CORNER_GOALS = (4, 7)  # DFR, DBR
@@ -55,23 +70,40 @@ def _fb_frame(frame: int) -> tuple[str, ...]:
     return ("x2",) + y
 
 
-def _fb_goal(cube: CubeState, reference: CubeState) -> bool:
-    return (
-        all(
-            cube.cp[pos] == reference.cp[pos] and cube.co[pos] == reference.co[pos]
-            for pos in _FB_CORNER_GOALS
-        )
-        and all(
-            cube.ep[pos] == reference.ep[pos] and cube.eo[pos] == reference.eo[pos]
-            for pos in _FB_EDGE_GOALS
-        )
+def _fb_cubies_goal(cube: CubeState, reference: CubeState) -> bool:
+    return all(
+        cube.cp[pos] == reference.cp[pos] and cube.co[pos] == reference.co[pos]
+        for pos in _FB_CORNER_GOALS
+    ) and all(
+        cube.ep[pos] == reference.ep[pos] and cube.eo[pos] == reference.eo[pos]
+        for pos in _FB_EDGE_GOALS
     )
 
 
-def first_block_solved(cube: CubeState) -> bool:
+def _fb_goal(cube: CubeState, reference: CubeState) -> bool:
+    return cube.center == reference.center and _fb_cubies_goal(cube, reference)
+
+
+def _fb_centers_match_frame(moves: tuple[str, ...], frame: tuple[str, ...]) -> bool:
+    """Return whether the physical FB sequence ends in the active frame."""
+    actual = apply_moves(CubeState.solved(), moves)
+    expected = apply_moves(CubeState.solved(), frame)
+    return actual.center == expected.center
+
+
+def first_block_solved(cube: CubeState, frame_index: int | None = None) -> bool:
+    """Return whether the Roux FB is solved in the requested frame.
+
+    With ``frame_index`` omitted this remains a convenient generic predicate
+    for callers that do not track the active setup frame. Solver verification
+    should always pass the exact frame selected for the current solve.
+    """
     if cube.is_solved():
         return True
     solved = CubeState.solved()
+    if frame_index is not None:
+        reference = apply_moves(solved, _fb_frame(frame_index))
+        return _fb_goal(cube, reference)
     for frame_index in range(4):
         frame = _fb_frame(frame_index)
         reference = apply_moves(solved, frame)
@@ -90,7 +122,7 @@ def second_block_solved(cube: CubeState) -> bool:
     solved = CubeState.solved()
     for frame_index in range(4):
         reference = apply_moves(solved, _fb_frame(frame_index))
-        if _fb_goal(cube, reference) and all(
+        if _fb_cubies_goal(cube, reference) and _centers_ready_for_eo_state(cube) and all(
             cube.cp[pos] == reference.cp[pos] and cube.co[pos] == reference.co[pos]
             for pos in _SB_CORNER_GOALS
         ) and all(
@@ -189,6 +221,65 @@ class _CMLLDatabase:
             return _cmll_two_look(cube, self.target)
 
 
+def _sb_move_penalty(moves: tuple[str, ...]) -> int:
+    return sum(_SB_MOVE_PENALTY[move] for move in moves)
+
+
+def _sb_final_move_ok(moves: tuple[str, ...]) -> bool:
+    return bool(moves) and moves[-1] in _SB_FINAL_MOVES
+
+
+class CornerOrientationAnalyzer:
+    """Analyze U-layer corner orientation and CMLL difficulty for final FR."""
+
+    def __init__(self, target: CubeState, database: _CMLLDatabase | None = None) -> None:
+        self.target = target
+        self.database = database or _CMLLDatabase(target)
+
+    def analyze(self, cube: CubeState) -> dict[str, object]:
+        orientation = tuple(
+            cube.co[cube.cp.index(self.target.cp[pos])]
+            for pos in _CMLL_CORNER_GOALS
+        )
+        misoriented = sum(value != 0 for value in orientation)
+        try:
+            entry, auf = self.database.recognize(cube)
+            cmll_moves = self.database.solve(cube)
+            case_id = entry["id"]
+            family = entry["family"]
+            available = True
+            error = None
+        except RuntimeError:
+            try:
+                cmll_moves = _cmll_two_look(cube, self.target)
+                case_id = "TWO_LOOK"
+                family = "MU-compatible fallback"
+                auf = ()
+                available = True
+                error = None
+            except RuntimeError as exc:
+                # This analyzer is advisory metadata. A recognition/search
+                # failure must never abort the SB phase itself.
+                case_id = "UNAVAILABLE"
+                family = "CMLL analysis unavailable"
+                cmll_moves = ()
+                auf = ()
+                available = False
+                error = str(exc)
+
+        return {
+            "orientation": orientation,
+            "misoriented_corners": misoriented,
+            "case_id": case_id,
+            "family": family,
+            "cmll_algorithm_length": len(cmll_moves),
+            "auf_length": len(auf),
+            "available": available,
+            "error": error,
+            "score": (misoriented, len(cmll_moves), len(auf)) if available else (99, 99, 99),
+        }
+
+
 def _cmll_recognized(database: _CMLLDatabase, cube: CubeState) -> bool:
     try:
         database.recognize(cube)
@@ -213,7 +304,7 @@ def _roux_blocks_and_cmll_solved(cube: CubeState, target: CubeState) -> bool:
         for pos in _CMLL_CORNER_GOALS
     )
     return (
-        _fb_goal(cube, target)
+        _fb_cubies_goal(cube, target)
         and all(
             cube.cp[pos] == target.cp[pos] and cube.co[pos] == target.co[pos]
             for pos in _SB_CORNER_GOALS
@@ -287,7 +378,7 @@ def _cmll_two_look(cube: CubeState, target: CubeState) -> tuple[str, ...]:
 
 
 def _lse_key(cube: CubeState, target: CubeState) -> tuple[int, ...]:
-    parts: list[int] = []
+    parts: list[int] = list(cube.center)
     for pos in (0, 1, 2, 3, 5, 7):
         piece = target.ep[pos]
         current = cube.ep.index(piece)
@@ -304,7 +395,7 @@ def _solve_eo_intuitive(cube: CubeState, target: CubeState) -> tuple[str, ...]:
     moves = (("M",), ("M2",), ("M'",), ("U",), ("U2",), ("U'",))
 
     def goal(state: CubeState) -> bool:
-        return _eo_solved(state, target) and all(
+        return state.center == target.center and _eo_solved(state, target) and all(
             state.cp[pos] == target.cp[pos] and state.co[pos] == target.co[pos]
             for pos in range(8)
         )
@@ -373,7 +464,13 @@ class _ULURIDAStar:
         alt_eo = list(self.target.eo)
         alt_ep[0], alt_ep[1], alt_ep[2], alt_ep[7] = self.target.ep[1], self.target.ep[0], self.target.ep[7], self.target.ep[2]
         alt_eo[0], alt_eo[1], alt_eo[2], alt_eo[7] = self.target.eo[1], self.target.eo[0], self.target.eo[7], self.target.eo[2]
-        self._alt_target = CubeState(cp=self.target.cp, co=self.target.co, ep=tuple(alt_ep), eo=tuple(alt_eo))
+        self._alt_target = CubeState(
+            cp=self.target.cp,
+            co=self.target.co,
+            ep=tuple(alt_ep),
+            eo=tuple(alt_eo),
+            center=self.target.center,
+        )
         self.pattern_db_alt = self._build_pattern_db(self._alt_target)
         self.handoff_db = self._build_handoff_db()
 
@@ -406,7 +503,7 @@ class _ULURIDAStar:
         return distances
 
     def _handoff_key(self, cube: CubeState) -> tuple[int, ...]:
-        parts: list[int] = []
+        parts: list[int] = list(cube.center)
         for pos in _CMLL_CORNER_GOALS:
             piece = self.target.cp[pos]
             current = cube.cp.index(piece)
@@ -429,7 +526,15 @@ class _ULURIDAStar:
             for pos, piece in zip(middle_positions, perm):
                 ep[pos] = piece
                 eo[pos] = self.target.eo[self.target.ep.index(piece)]
-            goals.append(CubeState(cp=self.target.cp, co=self.target.co, ep=tuple(ep), eo=tuple(eo)))
+            goals.append(
+                CubeState(
+                    cp=self.target.cp,
+                    co=self.target.co,
+                    ep=tuple(ep),
+                    eo=tuple(eo),
+                    center=self.target.center,
+                )
+            )
 
         distances: dict[tuple[int, ...], int] = {}
         queue = deque()
@@ -469,7 +574,7 @@ class _ULURIDAStar:
         raise RuntimeError(f"Roux ULUR IDA* failed within depth {self.max_depth}")
 
     def _goal(self, cube: CubeState) -> bool:
-        return _ulur_solved(cube, self.target)
+        return cube.center == self.target.center and _ulur_solved(cube, self.target)
 
     def _dfs(self, cube: CubeState, depth: int, threshold: int, previous_face: str | None):
         self._check_limits()
@@ -496,6 +601,11 @@ class _ULURIDAStar:
             if result is not None:
                 return result
         return None
+
+
+def _centers_ready_for_eo_state(cube: CubeState) -> bool:
+    """Return whether the U/D center positions contain the white/yellow pair."""
+    return {cube.center[0], cube.center[3]} == {0, 3}
 
 
 def _edges_solved(cube: CubeState, target: CubeState, positions: tuple[int, ...]) -> bool:
@@ -559,20 +669,23 @@ class _LSEFormulaDatabase:
         return None
 
     def solve_eo(self, cube: CubeState, target: CubeState):
-        if _eo_solved(cube, target):
+        centered_goal = lambda state, goal_target: state.center == goal_target.center and _eo_solved(state, goal_target)
+        if centered_goal(cube, target):
             return {"id": "SOLVED", "family": "SOLVED", "algorithm": ""}, ()
-        result = self._try_phase(cube, target, self.eo, _eo_solved)
+        result = self._try_phase(cube, target, self.eo, centered_goal)
         if result is None:
             return {"id": "INTUITIVE_MU", "family": "MU-only", "algorithm": ""}, _solve_eo_intuitive(cube, target)
         return result
 
     def solve_ulur_formula(self, cube: CubeState, target: CubeState):
-        if _ulur_solved(cube, target):
+        centered_goal = lambda state, goal_target: state.center == goal_target.center and _ulur_solved(state, goal_target)
+        if centered_goal(cube, target):
             return {"id": "SOLVED", "family": "SOLVED", "algorithm": ""}, ()
-        return self._try_phase(cube, target, self.ulur, _ulur_solved)
+        return self._try_phase(cube, target, self.ulur, centered_goal)
 
     def solve_l4e(self, cube: CubeState, target: CubeState):
-        if _l4e_solved(cube, target):
+        centered_goal = lambda state, goal_target: state.center == goal_target.center and _l4e_solved(state, goal_target)
+        if centered_goal(cube, target):
             return {"id": "SOLVED", "family": "SOLVED", "algorithm": ""}, ()
         # The Roux Method VN L4E page is a finite recognition table.  Its
         # 8 + 8 + special cases collapse to the 12 distinct edge permutations
@@ -580,7 +693,7 @@ class _LSEFormulaDatabase:
         # Recognize those cases directly with AUF, then execute the published
         # formula.  Do not turn this into a generic MU search: that would hide
         # recognition errors and violate the formula-driven L4E contract.
-        result = self._try_phase(cube, target, self.l4e_vn, _l4e_solved)
+        result = self._try_phase(cube, target, self.l4e_vn, centered_goal)
         if result is not None:
             return result
 
@@ -604,7 +717,7 @@ class _LSEFormulaDatabase:
         )
         for setup in steering:
             rotated = apply_moves(cube, setup)
-            result = self._try_phase(rotated, target, self.l4e_vn, _l4e_solved)
+            result = self._try_phase(rotated, target, self.l4e_vn, centered_goal)
             if result is not None:
                 entry, moves = result
                 return entry, setup + moves
@@ -711,7 +824,7 @@ class _SecondBlockSearch:
             raise TimeoutError("Roux Second Block search timeout exceeded")
 
     def _goal(self, cube: CubeState) -> bool:
-        return all(
+        return _fb_cubies_goal(cube, self.target) and _centers_ready_for_eo_state(cube) and all(
             cube.cp[pos] == self.target.cp[pos] and cube.co[pos] == self.target.co[pos]
             for pos in _SB_CORNER_GOALS
         ) and all(
@@ -722,12 +835,12 @@ class _SecondBlockSearch:
     def _projection_key(self, cube: CubeState) -> tuple:
         """Project the state onto the six SB cubies.
 
-        SB is a partial-state goal: only DFR/DBR and DR/FR/BR matter. A
+        SB is a partial-state goal: only DFR/DBR and DR/FR/BR matter, plus
+        the center frame is validated separately by the SB goal. A
         bidirectional search keyed by the complete CubeState is therefore
-        incorrect, because a state can satisfy the SB goal while the other
-        cubies differ from the canonical target. Encode each target cubie's
-        current position and orientation instead; this projection is Markovian
-        under the SB move set and is sufficient for goal matching.
+        incorrect because the other cubies may differ from the target. Encode
+        only the relevant target cubies and orientations here; center state is
+        checked at the phase boundary rather than multiplying the projection.
         """
         corner_parts = []
         corner_pieces = tuple(self.target.cp[pos] for pos in _SB_CORNER_GOALS)
@@ -736,11 +849,18 @@ class _SecondBlockSearch:
             corner_parts.extend((pos, cube.co[pos]))
         # The four U-layer corners are not fixed by SB, but their positions
         # are part of the partial state because SB must preserve them on U so
-        # that the resulting state is a valid CMLL starting position.
+        # that the resulting state is a valid CMLL starting position. Their
+        # orientations are intentionally omitted: SB does not constrain them,
+        # and CMLL owns their orientation after the phase boundary.
         for piece in (self.target.cp[pos] for pos in _CMLL_CORNER_GOALS):
             pos = cube.cp.index(piece)
-            corner_parts.extend((pos, cube.co[pos]))
-        edge_parts = []
+            corner_parts.append(pos)
+        # Slice/wide SB moves can permute all six centers, and the next
+        # center transition depends on their current side-center arrangement.
+        # Keep the full center permutation in the projection so the state key
+        # remains Markovian; the cubie projection itself is intentionally
+        # limited to SB/CMLL pieces.
+        edge_parts = list(cube.center)
         edge_pieces = tuple(self.target.ep[pos] for pos in _SB_EDGE_GOALS)
         for piece in edge_pieces:
             pos = cube.ep.index(piece)
@@ -760,11 +880,12 @@ class _SecondBlockSearch:
         # SB is a small subgroup when FB is fixed. Bidirectional breadth-first
         # search gives an exact shortest HTM result without the enormous
         # one-sided IDA* branching seen at depths 10-12.
-        # Split so an even depth budget can actually use both halves. With a
-        # 12-move limit, each side must be allowed to reach depth 6; using
-        # floor(12/2) on the goal side previously capped the combined search
-        # at 11 moves.
-        half = (self.max_depth + 1) // 2
+        # Keep the target-side table slightly shallower because center-aware
+        # keys are substantially larger than the legacy cubie-only projection.
+        # The start side gets the extra depth so 14-move solutions remain
+        # reachable without exhausting the shared node budget while building
+        # the goal frontier.
+        half = max(1, self.max_depth // 2 - 1)
         inverse = {
             "U": "U'", "U'": "U", "U2": "U2",
             "R": "R'", "R'": "R", "R2": "R2",
@@ -826,21 +947,29 @@ class _StagedSBSearch:
     """Recognition-first SB planner: DR pair -> square -> remaining pair."""
 
     target: CubeState
-    max_depth: int = 12
-    max_nodes: int | None = 500_000
-    timeout_seconds: float | None = 2.0
+    # Human-style SB is bounded by the same configurable depth/node/time
+    # budget as the direct SB oracle. Individual stages use that depth as their
+    # recognition/search ceiling rather than expanding indefinitely.
+    max_depth: int | None = 14
+    max_nodes: int | None = 2_000_000
+    timeout_seconds: float | None = 10.0
     nodes: int = field(init=False, default=0)
     started: float = field(init=False, default=0.0)
     path: list[str] = field(init=False, default_factory=list)
     strategy: str = field(init=False, default="DR_FIRST")
     opportunity: dict[str, object] = field(init=False, default_factory=dict)
     dr_candidate_limit: int = 3
+    use_corner_orientation_analyzer: bool = True
     dr_candidates_found: int = field(init=False, default=0)
     selected_pair_order: str | None = field(init=False, default=None)
     planner_score: tuple | None = field(init=False, default=None)
+    pair_order_evaluations: list[dict[str, object]] = field(init=False, default_factory=list)
+    corner_orientation_analyzer: CornerOrientationAnalyzer = field(init=False)
+    corner_orientation_analysis: dict[str, object] | None = field(init=False, default=None)
 
     def __post_init__(self) -> None:
         self.started = monotonic()
+        self.corner_orientation_analyzer = CornerOrientationAnalyzer(self.target)
 
     def _check_limits(self) -> None:
         if self.max_nodes is not None and self.nodes >= self.max_nodes:
@@ -849,7 +978,7 @@ class _StagedSBSearch:
             raise TimeoutError("Roux staged SB search timeout exceeded")
 
     def _goal(self, cube: CubeState) -> bool:
-        return all(
+        return _fb_cubies_goal(cube, self.target) and _centers_ready_for_eo_state(cube) and all(
             cube.cp[pos] == self.target.cp[pos] and cube.co[pos] == self.target.co[pos]
             for pos in _SB_CORNER_GOALS
         ) and all(
@@ -878,7 +1007,7 @@ class _StagedSBSearch:
         *,
         include_edges: tuple[int, ...] = (),
         preserve_goals: tuple[tuple[int, int], ...] = (),
-        max_stage_depth: int,
+        max_stage_depth: int | None,
     ) -> tuple[str, ...]:
         def goal(state: CubeState) -> bool:
             if not all(
@@ -905,10 +1034,12 @@ class _StagedSBSearch:
 
         if goal(cube):
             return ()
-        for threshold in range(self._heuristic(cube, goals), max_stage_depth + 1):
+        threshold = self._heuristic(cube, goals)
+        while max_stage_depth is None or threshold <= max_stage_depth:
             result = self._dfs(cube, 0, threshold, None, goal, goals)
             if result is not None:
                 return result
+            threshold += 1
         raise RuntimeError("Roux staged SB stage failed")
 
     def _solve_stage_candidates(
@@ -916,7 +1047,7 @@ class _StagedSBSearch:
         cube: CubeState,
         goals: tuple[tuple[int, int], ...],
         *,
-        max_stage_depth: int,
+        max_stage_depth: int | None,
         limit: int,
     ) -> list[tuple[str, ...]]:
         """Return a small set of shortest stage candidates.
@@ -966,10 +1097,12 @@ class _StagedSBSearch:
                 if len(results) >= limit:
                     return
 
-        for threshold in range(heuristic, max_stage_depth + 1):
+        threshold = heuristic
+        while max_stage_depth is None or threshold <= max_stage_depth:
             collect(cube, 0, threshold, None)
             if len(results) >= limit:
                 break
+            threshold += 1
         return results
 
     def _pair_order_options(
@@ -978,7 +1111,7 @@ class _StagedSBSearch:
         dr_moves: tuple[str, ...],
         dr_goal: tuple[int, int],
         *,
-        remaining_depth: int,
+        remaining_depth: int | None,
     ) -> list[dict[str, object]]:
         """Phase 2: evaluate both natural pair orders after a fixed DR.
 
@@ -999,7 +1132,7 @@ class _StagedSBSearch:
                     (first_pair,),
                     include_edges=(first_pair[1],),
                     preserve_goals=(dr_goal,),
-                    max_stage_depth=max(0, remaining_depth),
+                    max_stage_depth=remaining_depth,
                 )
             except (RuntimeError, TimeoutError):
                 continue
@@ -1052,17 +1185,97 @@ class _StagedSBSearch:
                 return result
         return None
 
+    def _solve_final_fr_candidates(
+        self,
+        cube: CubeState,
+        goals: tuple[tuple[int, int], ...],
+        *,
+        preserve_goals: tuple[tuple[int, int], ...],
+        max_depth: int | None,
+        limit: int = 6,
+    ) -> list[tuple[str, ...]]:
+        """Generate bounded final-FR candidates, including penalized exceptions."""
+        if limit <= 0:
+            return []
+        moves = _SB_MOVES + _SB_EXCEPTIONAL_MOVES
+        heuristic = self._heuristic(cube, goals)
+        results: list[tuple[str, ...]] = []
+        seen: set[tuple[str, ...]] = set()
+
+        def goal(state: CubeState) -> bool:
+            if not _fb_cubies_goal(state, self.target) or not _centers_ready_for_eo_state(state):
+                return False
+            if not all(
+                state.cp[corner] == self.target.cp[corner]
+                and state.co[corner] == self.target.co[corner]
+                and state.ep[edge] == self.target.ep[edge]
+                and state.eo[edge] == self.target.eo[edge]
+                for corner, edge in goals
+            ):
+                return False
+            if not all(
+                state.cp[corner] == self.target.cp[corner]
+                and state.co[corner] == self.target.co[corner]
+                and state.ep[edge] == self.target.ep[edge]
+                and state.eo[edge] == self.target.eo[edge]
+                for corner, edge in preserve_goals
+            ):
+                return False
+            return all(
+                state.ep[edge] == self.target.ep[edge]
+                and state.eo[edge] == self.target.eo[edge]
+                for edge in (4, 8, 11)
+            )
+
+        def collect(state: CubeState, depth: int, threshold: int, previous_face: str | None) -> None:
+            if len(results) >= limit:
+                return
+            self.nodes += 1
+            self._check_limits()
+            if depth + self._heuristic(state, goals) > threshold:
+                return
+            if goal(state):
+                candidate = tuple(self.path)
+                if candidate and candidate[-1] in _SB_FINAL_MOVES and candidate not in seen:
+                    seen.add(candidate)
+                    results.append(candidate)
+                return
+            if depth == threshold:
+                return
+            for move in moves:
+                face = move[0]
+                if previous_face is not None and face == previous_face:
+                    continue
+                self.path.append(move)
+                collect(apply_move(state, move), depth + 1, threshold, face)
+                self.path.pop()
+                if len(results) >= limit:
+                    return
+
+        threshold = heuristic
+        while max_depth is None or threshold <= max_depth:
+            collect(cube, 0, threshold, None)
+            if len(results) >= limit:
+                break
+            threshold += 1
+        results.sort(key=lambda path: (_sb_move_penalty(path), len(path), path))
+        return results
+
     def solve(self, cube: CubeState) -> tuple[str, ...]:
         # This planner is called with a fixed FB frame. Do not use the
         # frame-agnostic second_block_solved() predicate here: accepting a
         # different y-frame can produce a deceptively short candidate that
         # the fixed-target exact search cannot reproduce.
-        if all(
-            cube.cp[pos] == self.target.cp[pos] and cube.co[pos] == self.target.co[pos]
-            for pos in _SB_CORNER_GOALS
-        ) and all(
-            cube.ep[pos] == self.target.ep[pos] and cube.eo[pos] == self.target.eo[pos]
-            for pos in _SB_EDGE_GOALS
+        if (
+            _centers_ready_for_eo_state(cube)
+            and all(
+                cube.cp[pos] == self.target.cp[pos] and cube.co[pos] == self.target.co[pos]
+                for pos in _SB_CORNER_GOALS
+            )
+            and all(
+                cube.ep[pos] == self.target.ep[pos] and cube.eo[pos] == self.target.eo[pos]
+                for pos in _SB_EDGE_GOALS
+            )
         ):
             self.strategy = "ALREADY_SOLVED"
             self.opportunity = {"strategy": self.strategy, "squares": (), "pairs": ()}
@@ -1087,7 +1300,7 @@ class _StagedSBSearch:
                 paths = self._solve_stage_candidates(
                     cube,
                     (dr,),
-                    max_stage_depth=min(7, self.max_depth),
+                    max_stage_depth=self.max_depth,
                     limit=per_spec_limit,
                 )
             except (RuntimeError, TimeoutError):
@@ -1120,10 +1333,7 @@ class _StagedSBSearch:
         # human-style plan and solves only its final pair.
         plans: list[dict[str, object]] = []
         for _, dr, dr_moves, dr_state in unique:
-            remaining = self.max_depth - len(dr_moves)
-            if remaining < 0:
-                continue
-            for option in self._pair_order_options(dr_state, dr_moves, dr, remaining_depth=remaining):
+            for option in self._pair_order_options(dr_state, dr_moves, dr, remaining_depth=self.max_depth):
                 plans.append({
                     **option,
                     "dr": dr,
@@ -1132,43 +1342,104 @@ class _StagedSBSearch:
                 })
 
         plans.sort(key=lambda item: item["score"])
-        best: tuple[str, ...] | None = None
-        best_plan: dict[str, object] | None = None
+        completed_plans: list[tuple[tuple, tuple[str, ...], dict[str, object], dict[str, object]]] = []
         for plan in plans:
             dr_moves = plan["dr_moves"]
             first_moves = plan["first_moves"]
             final_pair = plan["final_pair"]
             state = plan["after_first"]
-            remaining = self.max_depth - len(dr_moves) - len(first_moves)
-            if remaining < 0:
-                continue
+            remaining = self.max_depth
             try:
-                final_moves = self._solve_stage(
-                    state,
-                    (final_pair,),
-                    include_edges=(4, 8, 11),
-                    preserve_goals=(plan["first_pair"],),
-                    max_stage_depth=remaining,
-                )
+                if plan["order"] == "FR_FIRST":
+                    final_candidates = self._solve_final_fr_candidates(
+                        state,
+                        (final_pair,),
+                        preserve_goals=(plan["first_pair"],),
+                        max_depth=remaining,
+                    )
+                else:
+                    final_candidates = [
+                        self._solve_stage(
+                            state,
+                            (final_pair,),
+                            include_edges=(4, 8, 11),
+                            preserve_goals=(plan["first_pair"],),
+                            max_stage_depth=remaining,
+                        )
+                    ]
             except (RuntimeError, TimeoutError):
                 continue
-            candidate = tuple(dr_moves + first_moves + final_moves)
-            candidate_state = apply_moves(cube, candidate)
-            if self._goal(candidate_state):
-                best = candidate
-                best_plan = plan
-                break
 
-        if best is None or best_plan is None:
+            ranked: list[tuple[tuple, tuple[str, ...], dict[str, object] | None]] = []
+            for final_moves in final_candidates:
+                candidate = tuple(dr_moves + first_moves + final_moves)
+                eo_setup = None
+                if plan["order"] == "FR_FIRST":
+                    candidate, eo_setup = _optimize_sb_final_move_for_eo(cube, self.target, candidate)
+                candidate_state = apply_moves(cube, candidate)
+                if not self._goal(candidate_state):
+                    continue
+                if plan["order"] == "FR_FIRST" and (
+                    not _sb_final_move_ok(candidate) or not _centers_ready_for_eo(candidate)
+                ):
+                    continue
+                analysis = (
+                    self.corner_orientation_analyzer.analyze(candidate_state)
+                    if plan["order"] == "FR_FIRST" and self.use_corner_orientation_analyzer
+                    else None
+                )
+                score = (
+                    _sb_move_penalty(candidate),
+                    analysis["score"] if analysis else (99, 99, 99),
+                    len(candidate),
+                    plan["score"],
+                    candidate,
+                )
+                ranked.append((score, candidate, {"eo_setup": eo_setup, "analysis": analysis}))
+
+            if ranked:
+                ranked.sort(key=lambda item: item[0])
+                final_score, final_candidate, final_metadata = ranked[0]
+                # Do not stop at the first successful pair order. FR_FIRST and
+                # BR_FIRST are peers: the better human-style choice is the one
+                # whose first pair leaves the other pair easier to solve. The
+                # actual completion is now known, so use it as the final
+                # tie-break instead of trusting a fixed FR->BR order.
+                human_score = (
+                    plan["score"],
+                    final_score[0],
+                    final_score[1],
+                    len(final_candidate),
+                    final_candidate,
+                )
+                completed_plans.append((human_score, final_candidate, plan, final_metadata))
+
+                self.pair_order_evaluations.append({
+                    "order": plan["order"],
+                    "dr_moves": len(dr_moves),
+                    "first_pair_moves": len(first_moves),
+                    "remaining_pair_heuristic": plan["final_heuristic"],
+                    "final_moves": len(final_candidate),
+                    "score": human_score,
+                })
+
+        if not completed_plans:
             raise RuntimeError("Roux staged Second Block search failed")
+        _, best, best_plan, best_metadata = min(completed_plans, key=lambda item: item[0])
         self.selected_pair_order = best_plan["order"]
         self.planner_score = best_plan["score"]
+        self.corner_orientation_analysis = best_metadata["analysis"]
         self.opportunity = {
             **self.opportunity,
             "dr_candidates": self.dr_candidates_found,
             "selected_pair_order": self.selected_pair_order,
             "planner_score": self.planner_score,
             "lookahead_opportunity": best_plan["opportunity"],
+            "pair_order_evaluations": tuple(self.pair_order_evaluations),
+            "eo_setup": best_metadata["eo_setup"],
+            "move_penalty": _sb_move_penalty(best),
+            "final_move": best[-1],
+            "corner_orientation_analyzer": self.corner_orientation_analysis,
         }
         return best
 
@@ -1227,7 +1498,7 @@ class _StagedSBSearch:
                         (dr_pair,),
                         include_edges=(include_dr_edge,),
                         preserve_goals=(free_pair,),
-                        max_stage_depth=min(7, self.max_depth),
+                        max_stage_depth=self.max_depth,
                     )
                     after_dr = apply_moves(cube, dr_moves)
                     final_moves = self._solve_stage(
@@ -1235,7 +1506,7 @@ class _StagedSBSearch:
                         (final_pair,),
                         include_edges=(4, 8, 11),
                         preserve_goals=(dr_pair, free_pair),
-                        max_stage_depth=self.max_depth - len(dr_moves),
+                        max_stage_depth=self.max_depth,
                     )
                 except (RuntimeError, TimeoutError):
                     continue
@@ -1246,6 +1517,95 @@ class _StagedSBSearch:
                     self.opportunity = {**self.opportunity, "selected_pair": side}
                     return candidate
         return None
+
+
+def _center_state_after_moves(moves: tuple[str, ...]) -> tuple[int, ...]:
+    init_kociemba_engine()
+    cube = EngineCube()
+    cube.move(" ".join(moves))
+    return tuple(cube.center)
+
+
+def _centers_ready_for_eo(moves: tuple[str, ...]) -> bool:
+    centers = _center_state_after_moves(moves)
+    return {centers[0], centers[3]} == {0, 3}
+
+
+def _optimize_sb_final_move_for_eo(
+    cube: CubeState,
+    target: CubeState,
+    moves: tuple[str, ...],
+) -> tuple[tuple[str, ...], dict[str, object]]:
+    current_state = apply_moves(cube, moves) if moves else cube
+    metadata: dict[str, object] = {
+        "applied": False,
+        "original_move": moves[-1] if moves else None,
+        "replacement_move": None,
+        "centers_ready_for_eo": _centers_ready_for_eo_state(current_state) if moves else _centers_ready_for_eo_state(cube),
+    }
+    if not moves or metadata["centers_ready_for_eo"]:
+        return moves, metadata
+    replacement = {"R": "r", "R'": "r'"}.get(moves[-1])
+    if replacement is None:
+        return moves, metadata
+    candidate = moves[:-1] + (replacement,)
+    candidate_state = apply_moves(cube, candidate)
+    if not (
+        all(
+            candidate_state.cp[pos] == target.cp[pos] and candidate_state.co[pos] == target.co[pos]
+            for pos in _SB_CORNER_GOALS
+        )
+        and all(
+            candidate_state.ep[pos] == target.ep[pos] and candidate_state.eo[pos] == target.eo[pos]
+            for pos in _SB_EDGE_GOALS
+        )
+        and _u_corners_on_u_layer(candidate_state, target)
+    ):
+        return moves, metadata
+    if not _centers_ready_for_eo_state(candidate_state):
+        return moves, metadata
+    metadata.update({"applied": True, "replacement_move": replacement})
+    return candidate, metadata
+
+
+_FRAME_CONJUGATION_CACHE: dict[tuple[str, ...], dict[str, str]] = {}
+
+
+def _frame_conjugation_map(frame: tuple[str, ...]) -> dict[str, str]:
+    """Map face turns through an active x/y frame without emitting rotations."""
+    cached = _FRAME_CONJUGATION_CACHE.get(frame)
+    if cached is not None:
+        return cached
+    solved = CubeState.solved()
+    inverse_frame = tuple(inverse_move(move) for move in reversed(frame))
+    candidates = tuple(MOVES)
+    mapping: dict[str, str] = {}
+    for move in candidates:
+        conjugated = apply_moves(solved, inverse_frame + (move,) + frame)
+        matches = [candidate for candidate in candidates if apply_move(solved, candidate) == conjugated]
+        if len(matches) != 1:
+            raise RuntimeError(f"Unable to conjugate Kociemba move {move!r} through frame {frame!r}")
+        mapping[move] = matches[0]
+    _FRAME_CONJUGATION_CACHE[frame] = mapping
+    return mapping
+
+
+def _kociemba_frame_fallback(
+    cube: CubeState,
+    target: CubeState,
+    frame: tuple[str, ...],
+) -> tuple[str, ...]:
+    """Solve the remaining cube as a last-resort oracle in the active frame."""
+    inverse_frame = tuple(inverse_move(move) for move in reversed(frame))
+    canonical = apply_moves(cube, inverse_frame)
+    result = KociembaSolver().solve(canonical)
+    if any(move[0] in "xyz" for move in result.moves):
+        raise RuntimeError("Kociemba fallback returned an unexpected whole-cube rotation")
+    mapping = _frame_conjugation_map(frame)
+    moves = tuple(mapping[move] for move in result.moves)
+    if apply_moves(cube, moves) != target:
+        raise RuntimeError("Kociemba frame fallback failed active-frame verification")
+    return moves
 
 
 def _pair_goal(cube: CubeState, reference: CubeState, corner: int, edge: int) -> bool:
@@ -1336,7 +1696,7 @@ class _StagedFBSearch:
             return tuple(self.path)
         if depth == threshold:
             return None
-        ordered = sorted(_ROUX_MOVES, key=lambda m: (m.endswith("2"), m[0] in "u"))
+        ordered = sorted(_FB_MOVES, key=lambda m: m.endswith("2"))
         for move in ordered:
             if previous_face is not None and move[0].lower() == previous_face.lower():
                 continue
@@ -1432,6 +1792,8 @@ def _staged_fb_candidate(
     physical_moves = frame + tuple(all_moves)
     if not _fb_goal(apply_moves(cube, physical_moves), reference):
         return None
+    if not _fb_centers_match_frame(physical_moves, frame):
+        return None
     return physical_moves, nodes
 
 
@@ -1487,7 +1849,7 @@ class _FirstBlockSearch:
         # Roux FB is not constrained by a preserved CFOP-style cross. B/D and
         # r/M are therefore legitimate ergonomic choices. Keep the search
         # HTM-neutral instead of imposing a cost on any face/slice move.
-        ordered = sorted(_ROUX_MOVES, key=lambda m: m.endswith("2"))
+        ordered = sorted(_FB_MOVES, key=lambda m: m.endswith("2"))
         for move in ordered:
             if previous_face is not None and move[0] == previous_face:
                 continue
@@ -1595,11 +1957,13 @@ class RouxSolver(Solver):
 
             if inner_moves is not None:
                 physical_moves = frame + inner_moves
-                candidates.append((len(physical_moves), frame_index, physical_moves, search, "exact"))
+                if _fb_centers_match_frame(physical_moves, frame):
+                    candidates.append((len(physical_moves), frame_index, physical_moves, search, "exact"))
 
             if staged_candidate is not None:
                 physical_moves, staged_nodes = staged_candidate
-                candidates.append((len(physical_moves), frame_index, physical_moves, staged_nodes, "staged"))
+                if _fb_centers_match_frame(physical_moves, frame):
+                    candidates.append((len(physical_moves), frame_index, physical_moves, staged_nodes, "staged"))
                 continue
 
             # Roux contract: rotations are a setup prefix only. Never rotate
@@ -1620,6 +1984,8 @@ class RouxSolver(Solver):
         candidate_reference = apply_moves(CubeState.solved(), _fb_frame(candidate_frame))
         if not _fb_goal(candidate_after, candidate_reference):
             raise RuntimeError("Roux First Block planner produced an invalid FB candidate")
+        if not _fb_centers_match_frame(candidate_fb, _fb_frame(candidate_frame)):
+            raise RuntimeError("Roux First Block planner produced a center-misaligned FB candidate")
 
         # Recognition-first SB candidate: DR-first -> square-first ->
         # opposite pair. This search begins only after FB has been finalized.
@@ -1662,8 +2028,34 @@ class RouxSolver(Solver):
             if staged_sb_moves is not None
             else exact_sb_moves
         )
+        sb_oracle_fallback = False
         if candidate_sb_moves is None:
-            raise RuntimeError("Roux Second Block search failed after the optimized First Block")
+            try:
+                candidate_sb_moves = _kociemba_frame_fallback(
+                    candidate_after,
+                    candidate_reference,
+                    _fb_frame(candidate_frame),
+                )
+                sb_oracle_fallback = True
+                staged_sb.strategy = "KOCIEMBA_FRAME_FALLBACK"
+            except RuntimeError as fallback_exc:
+                raise RuntimeError(
+                    "Roux Second Block search failed after the optimized First Block: "
+                    f"staged={staged_sb_moves is not None}, "
+                    f"staged_nodes={staged_sb.nodes}, "
+                    f"staged_strategy={staged_sb.strategy}, "
+                    f"exact_nodes={candidate_sb.nodes}; "
+                    f"oracle={fallback_exc}"
+                ) from fallback_exc
+        candidate_sb_moves, eo_setup = _optimize_sb_final_move_for_eo(
+            candidate_after,
+            candidate_reference,
+            tuple(candidate_sb_moves),
+        )
+        staged_sb.opportunity = {
+            **staged_sb.opportunity,
+            "eo_setup": eo_setup,
+        }
         candidate_sb_after = apply_moves(candidate_after, candidate_sb_moves)
         if not second_block_solved(candidate_sb_after):
             raise RuntimeError("Roux Second Block planner produced an invalid SB candidate")
@@ -1758,7 +2150,7 @@ class RouxSolver(Solver):
 
         _, frame_index, fb_moves, search, planner, sb_search, sb_inner, sb_after, staged_sb, sb_exact, reference, cmll, cmll_moves, eo_case, eo_moves, ulur_case, ulur_moves, l4e_case, l4e_moves = selected
         fb_after = apply_moves(cube, fb_moves)
-        if not _fb_goal(fb_after, reference):
+        if not first_block_solved(fb_after, frame_index):
             raise RuntimeError("Roux First Block failed phase-state verification")
         sb_after = apply_moves(fb_after, sb_inner)
         if not second_block_solved(sb_after):
@@ -1806,9 +2198,8 @@ class RouxSolver(Solver):
             + tuple(l4e_moves)
         )
         center_tracking_moves = frame_moves + construction_moves + original_frame
-        # The cubie state is already solved after undoing the setup frame.
-        # CubeState does not model centers, so a second center-normalization
-        # oracle cannot add correctness evidence for a valid x/y setup frame.
+        # Center tracking is part of the state now, so final verification
+        # compares both cubies and centers in the active physical frame.
         full_solution_moves: tuple[str, ...] = ()
 
         all_moves = fb_moves + tuple(sb_inner) + tuple(cmll_moves) + tuple(eo_moves) + tuple(ulur_moves) + tuple(l4e_moves)
@@ -1821,7 +2212,13 @@ class RouxSolver(Solver):
                 SolutionPhase(
                     name="First Block",
                     moves=fb_moves,
-                    description="Solve a Roux 1x2x3 First Block on the left with a white bottom; rotations are setup-only.",
+                    description=(
+                        "Setup rotation comes first (see metadata.fb_setup_moves). "
+                        "Physically rotate the cube by that setup, then execute the "
+                        "remaining First Block construction moves; do not treat the "
+                        "setup rotation as a face turn. Wide turns such as u' are "
+                        "literal wide-layer turns."
+                    ),
                 ),
                 SolutionPhase(
                     name="Second Block",
@@ -1858,16 +2255,22 @@ class RouxSolver(Solver):
                 "fb_depth": len(fb_moves),
                 "sb_depth": len(sb_inner),
                 "sb_search": "bidirectional-bfs",
-                "sb_planner": staged_sb.strategy if staged_sb_moves is not None else "direct_fallback",
-                "sb_strategy": staged_sb.strategy if staged_sb_moves is not None else "DIRECT_FALLBACK",
+                "sb_planner": staged_sb.strategy,
+                "sb_strategy": staged_sb.strategy,
                 "sb_opportunity": staged_sb.opportunity,
                 "sb_exact_refinement": sb_exact,
                 "sb_fallback": staged_sb_moves is None,
+                "sb_oracle_fallback": sb_oracle_fallback,
                 "sb_staged_nodes": staged_sb.nodes,
                 "sb_dr_candidates": staged_sb.dr_candidates_found,
                 "sb_dr_candidate_limit": staged_sb.dr_candidate_limit,
                 "sb_pair_order": staged_sb.selected_pair_order,
+                "sb_pair_order_evaluations": tuple(staged_sb.pair_order_evaluations),
                 "sb_planner_score": staged_sb.planner_score,
+                "sb_move_penalty": staged_sb.opportunity.get("move_penalty"),
+                "sb_final_move": staged_sb.opportunity.get("final_move"),
+                "sb_corner_orientation": staged_sb.opportunity.get("corner_orientation_analyzer"),
+                "sb_eo_setup": staged_sb.opportunity.get("eo_setup"),
                 "cmll_case": (
                     cmll.recognize(sb_after)[0]["id"]
                     if _cmll_recognized(cmll, sb_after)
@@ -1885,6 +2288,9 @@ class RouxSolver(Solver):
                 "l4e_case": l4e_case["id"],
                 "l4e_family": l4e_case["family"],
                 "frame": frame_index,
+                "fb_setup_moves": frame_moves,
+                "fb_construction_moves": tuple(fb_moves[len(frame_moves):]),
+                "fb_execution_order": "setup_rotation_then_construction",
                 "planner": planner,
                 "white_bottom": True,
                 "rotation_policy": "setup-prefix-only",
