@@ -8,8 +8,6 @@ from rubik_solver.cube.parser import normalize_scramble, parse_scramble
 from rubik_solver.cube.state import CubeState
 from rubik_solver.cube.validator import CubeValidationError, validate_cube
 from rubik_solver.solvers.registry import SolverUnavailableError, get_solver
-from rubik_solver.solvers.kociemba import KociembaSolver
-from rubik_solver.model.solution import Solution
 
 app = FastAPI(title="RubikSolver API", version="0.1.0")
 
@@ -41,26 +39,14 @@ def solve(request: SolveRequest) -> dict[str, object]:
     except SolverUnavailableError as exc:
         raise HTTPException(501, detail={"code": "SOLVER_UNAVAILABLE", "message": str(exc)}) from exc
     except RuntimeError as exc:
-        # Roux is a specialized planner and can legitimately exhaust its
-        # phase search on a difficult state. Do not turn that into an API 500:
-        # use the complete Kociemba solver as a generic, verified safety net.
-        # This is deliberately method-transparent in the response: callers
-        # can see that the requested Roux solve fell back to Kociemba.
-        if request.method.lower() != "roux":
-            raise
-        fallback = KociembaSolver().solve(cube)
-        solution = Solution(
-            method=fallback.method,
-            moves=fallback.moves,
-            metric=fallback.metric,
-            verified=fallback.verified,
-            phases=fallback.phases,
-            metadata={
-                **fallback.metadata,
-                "fallback_from": "roux",
-                "fallback_reason": str(exc),
-            },
-        )
+        # A failed Roux phase search is surfaced directly. Never replace the
+        # requested human-style SB strategy with a complete Kociemba solution.
+        if request.method.lower() == "roux":
+            raise HTTPException(
+                422,
+                detail={"code": "ROUX_PHASE_FAILED", "message": str(exc)},
+            ) from exc
+        raise
 
     return {
         "method": solution.method,

@@ -57,9 +57,15 @@ def test_solve_endpoint_reports_unavailable_solver() -> None:
     assert payload["method"] == "roux"
     assert payload["verified"] is True
     assert payload["phases"][0]["name"] == "First Block"
+    assert payload["phases"][1]["name"] == "Second Block"
+    assert [phase["name"] for phase in payload["phases"]] == [
+        "First Block", "Second Block", "CMLL", "EO", "ULUR", "L4E"
+    ]
+    assert payload["metadata"]["verification_scope"] == "first_block+second_block+cmll+eo+ulur+l4e"
+    assert payload["metadata"]["status"] == "l4e"
 
 
-def test_solve_endpoint_roux_handles_hard_scramble() -> None:
+def test_solve_endpoint_does_not_fallback_when_roux_phase_search_fails() -> None:
     response = client.post(
         "/api/solve",
         json={
@@ -68,10 +74,8 @@ def test_solve_endpoint_roux_handles_hard_scramble() -> None:
         },
     )
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["method"] == "roux"
-    assert payload["verified"] is True
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "ROUX_PHASE_FAILED"
 
 
 def test_solve_endpoint_supports_cfop() -> None:

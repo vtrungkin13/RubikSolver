@@ -1,3 +1,46 @@
+### 2026-10-18 - Roux SB strategy rewrite and SB-only phase checkpoint
+
+- Updated SB opportunity recognition to accept a square assembled outside its target slot when `R`/`R2`/`R'` can place it, and to recognize joined corner-edge piece identities independent of exact slot.
+- Added the free-pair-to-square attempt with a 7-move decision threshold. If that attempt is not found within 7 moves, the planner returns to DR-first or uses the separate preserve-pair path for already-joined FR/BR pairs.
+- Added a preserve-pair invariant to staged search so DR construction cannot temporarily break the selected pre-existing pair(s).
+- DR-first now evaluates both FR-first and BR-first after each DR candidate, scoring U/F visibility and the length/lookahead of the remaining pair instead of fixing the order.
+- Removed direct SB and Kociemba SB fallbacks from the Roux solve flow. The API no longer replaces a failed Roux strategy with a Kociemba full solve; it returns `ROUX_PHASE_FAILED`. `sb_max_depth=None` is now the default; node/time budgets remain configurable and independent from move depth.
+- Kept the SB phase independent from downstream phase selection, but restored the existing full continuation: CMLL, EO, ULUR, and L4E. Each phase now has its own post-state verification and state snapshot. Final success requires all cubies solved in the active frame; center permutation remains tracked in the snapshots but is observational rather than an LSE goal.
+- Updated tests for the new phase contract and added a regression for R-turn repositioning of a free square.
+- Restored full Roux output phases: First Block, Second Block, CMLL, EO, ULUR, and L4E. Every phase is validated on its actual post-state and stored in metadata (`fb_state`, `sb_state`, `cmll_state`, `eo_state`, `ulur_state`, `l4e_state`).
+- Kept the existing L4E formula recognizer as primary; added a local exact M/U L4E completion when the formula table has no matching case. This is an LSE-local fallback, not a direct SB or Kociemba fallback.
+- Validation: `python -m py_compile` and `git diff --check` passed; full project suite passed (**140 passed in 311.40s**); three focused regressions for full solve and active-frame behavior passed (**3 passed in 53.78s**).
+- Changes are not committed.
+
+### 2026-10-10 - Preserve the literal CubeState at the FB/SB boundary
+
+- Removed the `center` normalization that replaced the real post-FB center permutation with the active frame's center tuple before SB search.
+- SB and later phase planning now receive the actual `CubeState` obtained by applying the emitted FB moves to the scramble state. Final FB phase verification no longer reconstructs a synthetic center state.
+- Added `metadata.fb_state` containing the exact post-FB `cp`, `co`, `ep`, `eo`, and `center`; retained `fb_center_state` as a convenient center-only observation.
+- Updated the phase-boundary regression to assert cubie validity while checking that the real center state survives unchanged at the FB boundary.
+- Validation: compile check and `git diff --check` passed; focused post-FB state regression passed (**1 passed**). Full `tests/test_roux.py`: **30 passed, 3 failed**; failures are in existing end-to-end deterministic/active-frame/white-center-independent cases that cannot find a usable SB continuation or reject the Kociemba fallback's whole-cube rotation. These are not considered green and need separate SB/fallback investigation.
+- Changes are not committed.
+
+### 2026-10-10 - Roux FB center state is observational, not a solve constraint
+
+- FB completion is based on FB cubies; center permutation/color alignment does not extend the FB sequence or rank candidates.
+- The center permutation immediately after FB is recorded as `metadata.fb_center_state`. The planner normalizes only the center projection used internally by later cubie searches; it does not append center-restoration moves to the emitted solution.
+- Removed center readiness/alignment requirements from SB, EO, ULUR, and L4E goals and from the relevant search projections. SB still prioritizes FB compatibility and keeping U-layer corners on U, which are actual Roux phase constraints rather than center constraints.
+- Added an end-to-end regression for the reported scramble: verify the center state is captured at the FB boundary, no trailing center-only FB move is appended, and all cubies solve through the full Roux continuation.
+- Initial focused test exposed a downstream SB incompatibility; after making the SB projection cubie-only and prioritizing FB candidates compatible with the U-corner handoff, the phase-boundary test passes.
+- Focused regressions for the reported scramble and phase boundary pass (**2 passed**). `compileall` and `git diff --check` pass, but the full `tests/test_roux.py` suite currently has 2 failures on other deterministic scrambles / the white-center-independent case because SB cannot find a continuation for those selected FB states. Do not treat the full suite as green; broader FB candidate/phase compatibility still needs work.
+- Changes are not committed.
+
+### 2026-10-10 - Roux FB multi-pattern recognition and line-preserving plans
+
+- Added simultaneous FB pattern recognition for `Ctr-FL`, `Ctr-BL`, `Ctr-DL`, completed corner-edge pairs, 2x2 squares, and the FL/BL 1x3 line. `Ctr` denotes center and is used explicitly to avoid ambiguity with corner.
+- Updated staged FB planning to rank both side-pair choices using recognized square/line/center-edge/pair opportunities and compare complete, center-verified FB candidates instead of committing to a single pair based only on a heuristic.
+- When the FL/BL line is already present, the planner first attempts a line-preserving route while building the first pair and square; if that bounded attempt fails, it falls back to a route that may break the line. Existing square/pair structures are naturally recognized as completed stages.
+- Added regression tests for simultaneous pattern recognition and active-center-frame validation.
+- Validation: `python -m compileall -q src/rubik_solver/solvers/roux.py tests/test_roux.py`, `git diff --check`, and `python -m pytest tests/test_roux.py -q` all passed; Roux module: **26 passed**.
+- Candidate selection is shortest among the bounded staged candidates found; it is not a proof of globally shortest FB.
+- Changes are not committed.
+
 ### 2026-10-05 - Center-aware CubeState and Roux FB r/M/u support
 
 - Extended `CubeState` with `center: tuple[int, ...]` using the Kociemba engine's `U,R,F,D,L,B` convention.
@@ -1972,3 +2015,27 @@ Full suite: 77 passed in 14.25s
 
 **NEXT ACTION:**
 - Redesign FB candidate selection around SB-aware continuation search instead of selecting only the shortest FB candidate per frame.
+## 2026-10-10 — FB validates center colors against its cubies
+
+- FB completion requires the two target corners and three target edges to be solved, plus matching center colors on D/F/L/B (the four faces touching the FB).
+- The U/R center permutation is not itself an FB constraint; those centers may differ from the setup frame as long as D/F/L/B center colors still agree with the FB cubies.
+- The integrated full solver prefers fully frame-aligned candidates when available because downstream SB/CMLL/LSE continuation still uses the setup-frame target.
+- Added regressions for allowed non-FB-center permutation and rejection when FB-adjacent center colors disagree. The user's sample sequence is rejected by the current cube model because its D/F/L/B centers do not match the FB reference, despite the cubie positions passing.
+
+## 2026-10-10 — Human-style Roux FB setup and center/frame verification
+
+- Setup-frame ranking now prioritizes reusable structures already on the left: DL-corner pairs first, then correctly colored Ctr-FL/Ctr-BL, side CE pairs, and the FL-BL line.
+- FB candidate style ranking prefers wide `u` over `D` when comparing alternatives, while keeping rotations setup-prefix-only.
+- When a single side pair is available, pair-first ranking now precedes square/center-edge heuristics; square distance remains a tie-breaker so the planner favors the color/side with a shorter square construction.
+- FB is still validated after construction against its chosen active frame: both target corners and all three target edges must be solved, and D/F/L/B centers must match the colors adjacent to the block. U/R center permutation is allowed and is not a standalone failure.
+- Added focused regressions for frame pattern priority and wide-u-vs-D preference. End-to-end validation still checks `first_block_solved(fb_after, frame_index)` before the solver continues to SB.
+- Verification: compile check passed; focused FB regression selection **6 passed, 23 deselected**. The full Roux suite was also started, but remained in progress after more than 2 minutes because the existing end-to-end solver tests are expensive.
+
+### 2026-10-10 — Prefer existing DL/side pairs and add a Ctr-DL-first fallback
+
+- FB frame ranking now accounts for Ctr-DL in addition to existing DL-corner pairs and Ctr-FL/BL relationships.
+- If the selected corner already has a DL-edge pair or its side CE pair, the staged plan skips rebuilding the first pair and proceeds directly to square completion, then the opposite pair.
+- If no reusable FB structure is recognized, the staged plan first solves the DL edge with D/L centers aligned (Ctr-DL) using a bounded shortest-stage search, then builds the first pair, square, and remaining pair. The DL edge and D/L center colors are preserved during subsequent stages.
+- Existing Ctr-DL is preserved while the planner builds side pairs. Existing Ctr-FL/BL edges are likewise preserved when building the corresponding CE pair.
+- Added unit regressions for empty-pattern Ctr-DL-first ordering and skipping an already-existing pair.
+- Verification: compile check passed; focused FB regression selection **8 passed, 23 deselected**. The staged planner also produced verified FB candidates for all four setup frames on the reported scramble (9, 11, 12, and 11 HTM including setup respectively, under the bounded 1-second-per-frame staged search). The current cube model did not recognize any initial Ctr-DL/side-pair pattern in that scramble, so the new no-pattern Ctr-DL-first branch was exercised for this case.
