@@ -11,3 +11,4 @@ htmlcov/
 .vscode/
 *.log
 .DS_Store
+WORKLOG.md
