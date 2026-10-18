@@ -12,6 +12,8 @@ def _permutation_parity(values: tuple[int, ...]) -> int:
 
 
 def validate_cube(cube: CubeState) -> None:
+    if set(cube.center) != set(range(6)):
+        raise CubeValidationError("Invalid center permutation.")
     if set(cube.cp) != set(range(8)):
         raise CubeValidationError("Invalid corner permutation.")
     if set(cube.ep) != set(range(12)):
@@ -24,5 +26,7 @@ def validate_cube(cube: CubeState) -> None:
         raise CubeValidationError("Corner orientation sum is invalid.")
     if sum(cube.eo) % 2:
         raise CubeValidationError("Edge orientation sum is invalid.")
-    if _permutation_parity(cube.cp) != _permutation_parity(cube.ep):
+    # Slice, wide and whole-cube moves can permute centers. Their parity must
+    # participate in the physical-state parity invariant as well.
+    if (_permutation_parity(cube.cp) ^ _permutation_parity(cube.ep) ^ _permutation_parity(cube.center)) != 0:
         raise CubeValidationError("Corner/edge permutation parity mismatch.")

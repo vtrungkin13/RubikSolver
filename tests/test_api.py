@@ -13,6 +13,24 @@ def test_health_endpoint() -> None:
     assert response.json() == {"status": "ok"}
 
 
+def test_cube_state_endpoint_returns_54_facelets() -> None:
+    response = client.post("/api/cube/state", json={"scramble": ""})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["valid"] is True
+    assert len(payload["stickers"]) == 54
+    assert payload["stickers"] == "U" * 9 + "R" * 9 + "F" * 9 + "D" * 9 + "L" * 9 + "B" * 9
+    assert payload["is_solved"] is True
+
+
+def test_cube_state_endpoint_rejects_invalid_scramble() -> None:
+    response = client.post("/api/cube/state", json={"scramble": "R X U"})
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "INVALID_SCRAMBLE"
+
+
 def test_solve_endpoint_returns_verified_solution() -> None:
     response = client.post(
         "/api/solve",
@@ -24,6 +42,20 @@ def test_solve_endpoint_returns_verified_solution() -> None:
     assert payload["method"] == "kociemba"
     assert payload["verified"] is True
     assert payload["move_count"] > 0
+    assert len(payload["initial_state"]) == 54
+    assert len(payload["step_states"]) == payload["move_count"] + 1
+    assert payload["step_states"][0] == payload["initial_state"]
+    assert payload["step_states"][-1] == payload["final_state"]
+    assert payload["final_is_solved"] is True
+
+
+def test_cfop_final_state_accepts_a_rotated_whole_cube_frame() -> None:
+    response = client.post("/api/solve", json={"scramble": "R U", "method": "cfop"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["verified"] is True
+    assert payload["final_is_solved"] is True
 
 
 def test_solve_endpoint_accepts_extended_notation() -> None:

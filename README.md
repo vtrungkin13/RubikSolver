@@ -4,7 +4,7 @@ Bộ giải Rubik 3×3 viết bằng Python, kèm giao diện web.
 
 ## Trạng thái dự án
 
-Các mốc M0–M5 đã hoàn thành. CFOP được tích hợp từ đầu đến cuối với Cross, bốn cặp F2L, OLL một-look (57 trường hợp), PLL một-look (21 trường hợp), xác minh toàn bộ lời giải và hỗ trợ API. Roux có đủ các phase FB, SB, CMLL, EO, ULUR và L4E; chiến lược được mô tả riêng để phục vụ phát triển theo hướng giải thích được và gần với cách cuber giải thực tế.
+Dự án được chia thành bảy milestone: M1 Cube model + moves, M2 Scramble parser + validator, M3 Search foundation, M4 Kociemba solver, M5 CFOP, M6 Roux và M7 Web UI. M5 (CFOP) và M6 (Roux) đã thực hiện; các bước tiếp theo là tối ưu chất lượng lời giải, độ ổn định và kiểm thử hồi quy. Roux có đủ các phase FB, SB, CMLL, EO, ULUR và L4E; riêng SB vẫn còn các trường hợp cần điều tra và tối ưu như ghi trong roadmap.
 
 ## Triết lý thiết kế solver
 
@@ -35,6 +35,7 @@ Scramble hỗ trợ Singmaster chuẩn và mở rộng, gồm move lát giữa (
 
 ## Tài liệu
 
+- [Lộ trình và milestone](docs/ROADMAP.md)
 - [Đặc tả và kiến trúc tổng thể](docs/PROJECT_SPEC.md)
 - [Chiến lược Roux từng bước](docs/ROUX_STRATEGY.md)
 - [Chiến lược CFOP từng bước](docs/CFOP_STRATEGY.md)

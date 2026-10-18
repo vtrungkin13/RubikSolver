@@ -95,6 +95,7 @@ Chạy bộ kiểm thử bằng `pytest`. Trước khi tối ưu, phải giữ �
 
 ## 10. Cấu trúc tài liệu
 
+- [ROADMAP.md](ROADMAP.md): bảy milestone M1–M7, trạng thái và tiêu chí nghiệm thu.
 - Tài liệu này: mục tiêu, kiến trúc và nguyên tắc ở mức tổng thể.
 - [ROUX_STRATEGY.md](ROUX_STRATEGY.md): chiến lược Roux theo từng phase.
 - [CFOP_STRATEGY.md](CFOP_STRATEGY.md): chiến lược CFOP theo từng phase.

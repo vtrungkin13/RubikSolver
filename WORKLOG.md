@@ -10,6 +10,35 @@
 
 ## 1. Trạng thái hiện tại
 
+### 2026-10-18 — Bắt đầu triển khai Cube 3D
+
+- Đọc `docs/THIET_KE_KY_THUAT_CUBE_3D.md` và bắt đầu triển khai theo thứ tự API trạng thái → mô hình Three.js → animation → đồng bộ snapshot.
+- Thêm `POST /api/cube/state`, serialize 54 facelet theo thứ tự URFDLB và bổ sung `initial_state`, `step_states`, `final_state` trong phản hồi solve.
+- Tạo `frontend/cube/cube-view.js` và `frontend/cube/cube-app.js`: dựng 27 cubie/sticker, OrbitControls, hoạt ảnh mặt, hỗ trợ face/wide/slice/whole-cube moves, Next/Previous/Reset, kiểm tra snapshot.
+- Nối panel Cube 3D vào giao diện, đồng bộ scramble và ngôn ngữ EN/VI, highlight move hiện tại; giữ nguyên các thay đổi frontend/API có sẵn trước đó.
+- Điều chỉnh kiểm tra parity để tính cả hoán vị tâm — cần thiết cho các trạng thái hợp lệ sinh bởi wide/slice/whole-cube moves. Bổ sung kiểm thử cho API trạng thái và trạng thái mở rộng.
+- Kiểm thử đã đạt: `tests/test_api.py` (10 passed) trước cập nhật validator; `tests/test_validator.py` sau cập nhật (11 passed); kiểm thử trình duyệt đã đi qua chuỗi `r U2 M x`, 13 move gồm đủ sáu mặt, move nghịch và `R2`, cùng Previous/Reset; tất cả snapshot khớp.
+- Bộ kiểm thử toàn dự án trên trạng thái cuối: `python -m pytest -q` — **148 passed in 319.84s**. Trước đó, bộ API/validator đạt 21 test và kiểm thử CFOP rotated-frame + validator đạt 12 test. Kiểm tra trình duyệt xác nhận CFOP/Roux/Kociemba đều trả snapshot cuối solved với scramble `R U`; đã chạy từng bước qua đủ sáu mặt, move nghịch, `R2`, wide/slice/rotation và kiểm tra Previous/Reset. Chưa commit.
+- Three.js hiện tải từ CDN phiên bản ghim `0.180.0`, nên cần cân nhắc vendoring/offline ở bước hoàn thiện.
+
+### 2026-10-18 — Cập nhật trạng thái M5 và M6
+
+- Đánh dấu M5 (CFOP) và M6 (Roux) là **đã thực hiện; cần tối ưu** trong `docs/ROADMAP.md`.
+- Cập nhật README và ưu tiên tiếp theo: tối ưu chất lượng lời giải CFOP; cải thiện độ ổn định SB của Roux và bổ sung kiểm thử hồi quy.
+- Chưa chạy kiểm thử trong lần cập nhật tài liệu này; các trường hợp SB thất bại đã ghi nhận vẫn là đầu việc cần xử lý, không che giấu bằng cách hạ trạng thái milestone.
+
+### 2026-10-18 — Chuẩn hóa danh sách milestone thành M1–M7
+
+- Thống nhất thứ tự milestone: M1 Cube model + moves; M2 Scramble parser + validator; M3 Search foundation; M4 Kociemba solver; M5 CFOP; M6 Roux; M7 Web UI.
+- Cập nhật `docs/ROADMAP.md`, phần trạng thái dự án trong `README.md` và mục cấu trúc tài liệu của `docs/PROJECT_SPEC.md` để thống nhất với danh sách bảy milestone đã chốt.
+- Chưa chạy lại bộ kiểm thử vì thay đổi lần này chỉ điều chỉnh tài liệu.
+
+### 2026-10-18 — Bổ sung roadmap và tiêu chí nghiệm thu milestone
+
+- Tạo `docs/ROADMAP.md` để theo dõi milestone M1–M7, trạng thái, tiêu chí nghiệm thu và ưu tiên tiếp theo.
+- Liên kết roadmap từ `README.md` và bổ sung vào danh sách tài liệu chuẩn.
+- Trạng thái milestone được ghi thận trọng theo tài liệu hiện có; cần đối chiếu kết quả kiểm thử thực tế trước khi tuyên bố hoàn thành, đặc biệt với Roux/SB.
+
 ### 2026-10-18 — Chuẩn hóa tài liệu tiếng Việt và đối chiếu chiến lược solver
 
 - Chuyển `README.md` và tài liệu trong `docs/` sang tiếng Việt; giữ nguyên tên API, phase, ký hiệu nước đi, lớp/hàm và thuật ngữ cần thiết để đối chiếu mã nguồn.
@@ -103,6 +132,7 @@
 
 ## 4. Tài liệu chuẩn
 
+- `docs/ROADMAP.md` — milestone, trạng thái và tiêu chí nghiệm thu.
 - `README.md` — giới thiệu dự án và cách bắt đầu.
 - `docs/PROJECT_SPEC.md` — đặc tả và kiến trúc tổng thể.
 - `docs/ROUX_STRATEGY.md` — chiến lược Roux theo từng phase; đối chiếu với `src/rubik_solver/solvers/roux.py`.

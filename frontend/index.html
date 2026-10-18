@@ -1,8 +1,126 @@
 <!doctype html>
 <html lang="vi">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>RubikSolver</title><link rel="stylesheet" href="style.css"></head>
-<body><main class="app"><header><h1>RubikSolver</h1><p>3×3 solver — Python core + FastAPI</p></header>
-<section class="panel"><label for="scramble">Scramble</label><input id="scramble" value="R U R' F2 D L2">
-<label for="method">Method</label><select id="method"><option value="cfop">CFOP</option><option value="roux">Roux</option><option value="kociemba" selected>Kociemba</option><option value="optimal">Optimal</option></select>
-<button id="solve">Solve</button><p id="status"></p></section>
-<section id="result" class="panel hidden"><div id="summary"></div><h2>Solution</h2><pre id="solution"></pre><div id="phases"></div></section></main><script src="app.js"></script></body></html>
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f8f6ef">
+    <title>RubikSolver — Giải Rubik 3×3</title>
+    <link rel="stylesheet" href="style.css">
+    <script type="importmap">
+        {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js"}}
+    </script>
+</head>
+
+<body>
+    <div class="page-shell">
+        <header class="topbar">
+            <a class="brand" href="#" aria-label="RubikSolver">
+                <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
+                <span>Rubik<span class="brand-accent">Solver</span></span>
+            </a>
+            <div class="topbar-actions">
+                <button id="language-toggle" class="language-toggle" type="button"
+                    aria-label="Switch language to English" title="Switch language">EN <span
+                        class="language-divider">/</span> VI</button>
+            </div>
+        </header>
+
+        <main>
+            <section class="hero">
+                <div class="hero-copy">
+                    <h1 data-i18n="heroTitle">Giải Rubik 3×3</h1>
+                    <p class="hero-description" data-i18n="heroDescription">Nhập công thức scramble và chọn phương pháp
+                        giải để xem chuỗi nước đi.</p>
+                </div>
+                <div class="cube-art" aria-label="Rubik cube illustration">
+                    <span class="art-spark spark-one" aria-hidden="true">✳</span>
+                    <span class="art-spark spark-two" aria-hidden="true">✦</span>
+                    <img src="assets/cube-art.webp" alt="Khối Rubik 3×3 nhiều màu" width="360" height="360"
+                        fetchpriority="high" data-i18n-alt="cubeAlt">
+                    <span class="art-caption">MIX IT UP <span>↗</span></span>
+                </div>
+            </section>
+
+            <div class="workspace">
+                <section class="panel input-panel">
+                    <div class="section-heading">
+                        <div class="step-number">01</div>
+                        <div>
+                            <h2 data-i18n="setupTitle">Thiết lập bài giải</h2>
+                            <p data-i18n="setupDescription">Bắt đầu với trạng thái cube của bạn.</p>
+                        </div>
+                    </div>
+                    <label for="scramble"><span data-i18n="scrambleLabel">Scramble</span><span class="label-hint"
+                            data-i18n="scrambleHint">Công thức xáo trộn</span></label>
+                    <textarea id="scramble" rows="3" spellcheck="false" placeholder="Ví dụ: R U R' U' F2 D L2"
+                        aria-describedby="scramble-help"></textarea>
+                    <div class="field-footer"><span id="scramble-help" data-i18n="scrambleHelp">Dùng ký hiệu chuẩn: R,
+                            U, F, L, D, B và dấu ' hoặc 2.</span><span id="char-count">0 ký tự</span></div>
+
+                    <label for="method" data-i18n="methodLabel">Phương pháp giải</label>
+                    <div class="select-wrap"><select id="method">
+                            <option value="cfop" selected>CFOP — Cross, F2L, OLL, PLL</option>
+                            <option value="roux">Roux — Giải theo block</option>
+                            <option value="kociemba">Kociemba — Nhanh, tổng quát</option>
+                        </select><span class="select-chevron" aria-hidden="true">⌄</span></div>
+                    <p id="method-help" class="method-help">Tìm lời giải nhanh cho nhiều trạng thái cube khác nhau.</p>
+                    <button id="solve" class="primary-button"><span class="button-icon">✳</span><span id="solve-label"
+                            data-i18n="solve">Tìm lời giải</span><span class="button-arrow">→</span></button>
+                    <p id="status" class="status-message" role="status" aria-live="polite"></p>
+                    <div class="privacy-note"><span aria-hidden="true">⌁</span><span data-i18n="privacy">Lời giải được
+                            xử lý bởi API cục bộ của bạn.</span></div>
+                </section>
+
+                <section class="panel cube-panel" aria-label="Cube 3D">
+                    <div class="section-heading cube-heading">
+                        <div class="step-number">02</div>
+                        <div>
+                            <h2 data-i18n="cubeTitle">Cube 3D</h2>
+                            <p data-i18n="cubeDescription">Xoay góc nhìn, theo dõi từng nước đi.</p>
+                        </div>
+                    </div>
+                    <div id="cube-stage" class="cube-stage">
+                        <canvas id="cube-canvas" aria-label="Interactive 3D Rubik cube"></canvas>
+                        <p id="cube-loading" class="cube-loading" role="status">Đang khởi tạo cube 3D…</p>
+                    </div>
+                    <div class="cube-controls">
+                        <button id="cube-previous" class="secondary-button" type="button" disabled>← <span data-i18n="previous">Trước</span></button>
+                        <span id="cube-step" class="cube-step">0 / 0</span>
+                        <button id="cube-next" class="secondary-button" type="button" disabled><span data-i18n="next">Tiếp</span> →</button>
+                    </div>
+                    <button id="cube-reset" class="cube-reset" type="button" disabled data-i18n="resetCube">Đặt lại trạng thái scramble</button>
+                </section>
+
+                <section id="result" class="panel result-panel hidden" aria-live="polite">
+                    <div class="section-heading result-heading">
+                        <div class="step-number success-step">03</div>
+                        <div>
+                            <h2 data-i18n="resultTitle">Lời giải của bạn</h2>
+                            <p data-i18n="resultDescription">Thực hiện các nước đi theo đúng thứ tự.</p>
+                        </div>
+                        <span id="verified-badge" class="verified-badge">✓ Đã xác minh</span>
+                    </div>
+                    <div id="summary" class="summary-grid"></div>
+                    <div class="solution-heading">
+                        <div>
+                            <h3 data-i18n="sequenceTitle">Chuỗi nước đi</h3>
+                            <p data-i18n="sequenceDescription">Đọc từ trái sang phải</p>
+                        </div><button id="copy-solution" class="secondary-button" type="button">▢ <span
+                                data-i18n="copy">Sao chép</span></button>
+                    </div>
+                    <pre id="solution" class="solution-sequence"></pre>
+                    <div class="phases-heading">
+                        <h3 data-i18n="phasesTitle">Các giai đoạn</h3><span id="phase-count"></span>
+                    </div>
+                    <div id="phases"></div>
+                </section>
+            </div>
+            <footer class="footer"><span>RubikSolver</span></footer>
+        </main>
+    </div>
+    <script src="app.js"></script>
+    <script type="module" src="cube/cube-app.js"></script>
+</body>
+
+</html>

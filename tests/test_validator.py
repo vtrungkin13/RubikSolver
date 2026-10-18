@@ -1,6 +1,8 @@
 import pytest
 
 from rubik_solver.cube.state import CubeState
+from rubik_solver.cube.moves import apply_moves
+from rubik_solver.cube.parser import parse_scramble
 from rubik_solver.cube.validator import CubeValidationError, validate_cube
 
 
@@ -36,3 +38,8 @@ def test_invalid_edge_permutation_values() -> None:
     cube = CubeState(ep=(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12))
     with pytest.raises(CubeValidationError, match="edge permutation"):
         validate_cube(cube)
+
+
+@pytest.mark.parametrize("scramble", ["r", "M", "x", "Rw U M2", "R U r U2 M x"])
+def test_extended_move_sequences_preserve_cube_validity(scramble: str) -> None:
+    validate_cube(apply_moves(CubeState.solved(), parse_scramble(scramble)))
