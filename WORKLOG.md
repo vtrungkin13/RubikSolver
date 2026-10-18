@@ -18,7 +18,8 @@
 - Nối panel Cube 3D vào giao diện, đồng bộ scramble và ngôn ngữ EN/VI, highlight move hiện tại; giữ nguyên các thay đổi frontend/API có sẵn trước đó.
 - Điều chỉnh kiểm tra parity để tính cả hoán vị tâm — cần thiết cho các trạng thái hợp lệ sinh bởi wide/slice/whole-cube moves. Bổ sung kiểm thử cho API trạng thái và trạng thái mở rộng.
 - Kiểm thử đã đạt: `tests/test_api.py` (10 passed) trước cập nhật validator; `tests/test_validator.py` sau cập nhật (11 passed); kiểm thử trình duyệt đã đi qua chuỗi `r U2 M x`, 13 move gồm đủ sáu mặt, move nghịch và `R2`, cùng Previous/Reset; tất cả snapshot khớp.
-- Bộ kiểm thử toàn dự án trên trạng thái cuối: `python -m pytest -q` — **148 passed in 319.84s**. Trước đó, bộ API/validator đạt 21 test và kiểm thử CFOP rotated-frame + validator đạt 12 test. Kiểm tra trình duyệt xác nhận CFOP/Roux/Kociemba đều trả snapshot cuối solved với scramble `R U`; đã chạy từng bước qua đủ sáu mặt, move nghịch, `R2`, wide/slice/rotation và kiểm tra Previous/Reset. Chưa commit.
+- Bộ kiểm thử toàn dự án trên trạng thái cuối: `python -m pytest` — **148 passed in 307.81s**. Trước đó, bộ API/validator đạt 21 test và kiểm thử CFOP rotated-frame + validator đạt 12 test. Kiểm tra trình duyệt xác nhận CFOP/Roux/Kociemba đều trả snapshot cuối solved với scramble `R U`; đã chạy từng bước qua đủ sáu mặt, move nghịch, `R2`, wide/slice/rotation và kiểm tra Previous/Reset.
+- Đã commit trạng thái này trên nhánh `main`: `444e99f` (`Update solver, frontend, and cube 3D design`). Tại thời điểm commit, working tree sạch; chưa push lên remote.
 - Three.js hiện tải từ CDN phiên bản ghim `0.180.0`, nên cần cân nhắc vendoring/offline ở bước hoàn thiện.
 
 ### 2026-10-18 — Cập nhật trạng thái M5 và M6
