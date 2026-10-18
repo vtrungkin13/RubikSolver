@@ -1,19 +1,42 @@
-﻿# RubikSolver
+# RubikSolver
 
-Python 3×3 Rubik's Cube solver with a web interface.
+Bộ giải Rubik 3×3 viết bằng Python, kèm giao diện web.
 
-Current stage: M0–M5 complete. CFOP is integrated end-to-end as Cross → F2L → 1-look OLL (57 cases) → 1-look PLL (21 cases), with full-solution verification and API support. Roux is in active development and is being used as the first **learning-oriented human-style solver** reference; CFOP improvements remain pending.
+## Trạng thái dự án
 
-## Solver philosophy
+Các mốc M0–M5 đã hoàn thành. CFOP được tích hợp từ đầu đến cuối với Cross, bốn cặp F2L, OLL một-look (57 trường hợp), PLL một-look (21 trường hợp), xác minh toàn bộ lời giải và hỗ trợ API. Roux có đủ các phase FB, SB, CMLL, EO, ULUR và L4E; chiến lược được mô tả riêng để phục vụ phát triển theo hướng giải thích được và gần với cách cuber giải thực tế.
 
-The project is intended not only to solve cubes, but to help cubers learn better solving decisions. Solutions should therefore preserve meaningful phase boundaries, expose useful strategy/case metadata, and distinguish human-style planning from optimized or emergency/oracle search.
+## Triết lý thiết kế solver
 
-This philosophy is especially important for Roux SB and will be carried forward when the pending CFOP work resumes, including Cross quality, F2L pair choice/order, lookahead, free-pair opportunities, and ergonomics.
+Mục tiêu không chỉ là giải được cube mà còn giúp cuber học cách đưa ra quyết định tốt. Vì vậy, lời giải cần giữ ranh giới phase rõ ràng, cung cấp metadata hữu ích về chiến lược/trường hợp, và phân biệt chiến lược human-style với tìm kiếm tối ưu hoặc tìm kiếm oracle.
 
-Run tests with `pip install -e ".[dev]"` then `pytest`.
+## Cài đặt và chạy
 
-Scrambles accept standard and extended Singmaster notation, including slice moves (`M E S`), cube rotations (`x y z`), and wide turns (`r` or `Rw`, etc.).
+Cài đặt package cùng dependency phát triển:
 
-Run API with `uvicorn api.main:app --reload` and frontend with `python -m http.server 5500 --directory frontend`.
+```powershell
+pip install -e ".[dev]"
+pytest
+```
 
-See PROJECT_SPEC.md and DEPLOYMENT.md for architecture and deployment details.
+Chạy API:
+
+```powershell
+uvicorn api.main:app --reload
+```
+
+Chạy frontend tĩnh:
+
+```powershell
+python -m http.server 5500 --directory frontend
+```
+
+Scramble hỗ trợ Singmaster chuẩn và mở rộng, gồm move lát giữa (`M E S`), xoay toàn khối (`x y z`) và move lớp rộng (`r` hoặc `Rw`, v.v.).
+
+## Tài liệu
+
+- [Đặc tả và kiến trúc tổng thể](docs/PROJECT_SPEC.md)
+- [Chiến lược Roux từng bước](docs/ROUX_STRATEGY.md)
+- [Chiến lược CFOP từng bước](docs/CFOP_STRATEGY.md)
+- [Cài đặt, chạy và triển khai](docs/DEPLOYMENT.md)
+- [Thông tin giấy phép bên thứ ba](docs/THIRD_PARTY_NOTICES.md)
