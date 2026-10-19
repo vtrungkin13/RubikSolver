@@ -1,4 +1,4 @@
-from rubik_solver.cube.moves import apply_moves, inverse_move
+from rubik_solver.cube.moves import apply_moves, inverse_move, normalize_moves
 from rubik_solver.cube.parser import parse_scramble
 from rubik_solver.cube.state import CubeState
 from rubik_solver.solvers.roux import (
@@ -31,6 +31,9 @@ from rubik_solver.solvers.roux import (
     _sb_joined_pair_inventory,
     _sb_pair_lookahead_score,
     _fb_frame,
+    _fb_frame_indices_for_cube,
+    _fb_target,
+    _fb_target_for_frame,
     first_block_solved,
     second_block_solved,
 )
@@ -45,8 +48,48 @@ def test_cube_state_tracks_centers_for_extended_roux_moves() -> None:
     assert apply_moves(solved, ("r", "r", "r", "r")).is_solved()
 
 
+def test_move_normalization_combines_adjacent_turns_without_changing_state() -> None:
+    cases = (
+        (("F2", "F'"), ("F",)),
+        (("R", "R"), ("R2",)),
+        (("U", "U'"), ()),
+        (("B'", "B'"), ("B2",)),
+        (("M", "M'"), ()),
+        (("r2", "r'"), ("r",)),
+        (("x", "x2", "x"), ()),
+        # Different move families must not be merged or reordered.
+        (("R", "r'"), ("R", "r'")),
+    )
+    solved = CubeState.solved()
+    for original, expected in cases:
+        normalized = normalize_moves(original)
+        assert normalized == expected
+        assert apply_moves(solved, original) == apply_moves(solved, normalized)
+
+    assert normalize_moves(("F2", "F'", "R", "R'", "U", "U2")) == ("F", "U'")
+
+
+def test_fb_frame_group_covers_24_orientations_without_center_color_filtering() -> None:
+    frames = tuple(_fb_frame(index) for index in range(24))
+    orientations = {apply_moves(CubeState.solved(), frame).center for frame in frames}
+    assert len(frames) == 24
+    assert len(orientations) == 24
+    assert frames[:4] == (("x2",), ("x2", "y"), ("x2", "y2"), ("x2", "y'"))
+
+    # Every input state can use every geometric frame. White-center location
+    # must not filter the candidate frames.
+    input_white_positions = set()
+    for orientation in frames:
+        cube = apply_moves(CubeState.solved(), orientation)
+        input_white_positions.add(cube.center.index(0))
+        compatible = _fb_frame_indices_for_cube(cube)
+        assert compatible == tuple(range(24))
+    assert input_white_positions == set(range(6))
+    assert len({_fb_target_for_frame(frame).center for frame in frames}) == 24
+
+
 def test_fb_pattern_recognizer_collects_compatible_patterns_together() -> None:
-    target = apply_moves(CubeState.solved(), _fb_frame(0))
+    target = _fb_target()
     patterns = _fb_pattern_snapshot(target, target)
 
     # Recognition is multi-label: an already-solved FB exposes its center-edge
@@ -62,7 +105,7 @@ def test_fb_pattern_recognizer_collects_compatible_patterns_together() -> None:
 
 
 def test_fb_pattern_recognizer_uses_active_center_frame() -> None:
-    target = apply_moves(CubeState.solved(), _fb_frame(0))
+    target = _fb_target()
     shifted_centers = apply_moves(target, ("M",))
     patterns = _fb_pattern_snapshot(shifted_centers, target)
 
@@ -83,17 +126,18 @@ def test_fb_move_style_prefers_wide_u_to_d_turns() -> None:
     assert _fb_move_style_score(("x2", "R2")) < _fb_move_style_score(("x2", "L2"))
 
 
-def test_fb_search_goal_requires_l_center_only_and_tracks_other_centers() -> None:
+def test_fb_search_goal_uses_white_bottom_stickers_not_white_center() -> None:
     from dataclasses import replace
 
-    target = apply_moves(CubeState.solved(), _fb_frame(0))
+    target = _fb_target()
     centers_shifted = apply_moves(target, ("M",))
-    # M permutes U/F/D/B in the model but leaves L/R centers fixed. FB only
-    # requires L to match the block; the other center positions are observed.
+    # M moves the white center away from D but leaves the FB cubies and L
+    # center solved. White on the bottom is defined by DL/DFL/DBL stickers.
+    assert centers_shifted.center[3] != 0
     assert _fb_search_goal(centers_shifted, target)
     assert _fb_goal(centers_shifted, target)
 
-    # Any non-L center permutation is allowed at the FB goal boundary.
+    # Centers other than L may be permuted at the FB goal boundary, including D.
     non_fb_centers_permuted = list(target.center)
     non_fb_centers_permuted[0], non_fb_centers_permuted[1] = (
         non_fb_centers_permuted[1], non_fb_centers_permuted[0]
@@ -101,6 +145,12 @@ def test_fb_search_goal_requires_l_center_only_and_tracks_other_centers() -> Non
     state = replace(target, center=tuple(non_fb_centers_permuted))
     assert _fb_search_goal(state, target)
     assert _fb_goal(state, target)
+
+    wrong_l_center = list(target.center)
+    wrong_l_center[4], wrong_l_center[1] = wrong_l_center[1], wrong_l_center[4]
+    state_with_wrong_l = replace(target, center=tuple(wrong_l_center))
+    assert not _fb_search_goal(state_with_wrong_l, target)
+    assert not _fb_goal(state_with_wrong_l, target)
 
 
 def test_fb_stages_start_with_ctr_dl_when_no_reusable_block_exists() -> None:
@@ -196,7 +246,7 @@ def test_roux_end_to_end_deterministic_scrambles() -> None:
         assert after.co == result.metadata["l4e_state"]["co"], scramble
         assert after.ep == result.metadata["l4e_state"]["ep"], scramble
         assert after.eo == result.metadata["l4e_state"]["eo"], scramble
-        reference = apply_moves(CubeState.solved(), frame)
+        reference = _fb_target()
         assert after.center == reference.center, scramble
         assert result.metadata["l4e_state"]["center"] == reference.center, scramble
 
@@ -215,7 +265,7 @@ def test_regression_scramble_fb_uses_exact_active_frame() -> None:
     assert result.metadata["fb_execution_order"] == "setup_rotation_then_construction"
     assert first_block_solved(fb_after, result.metadata["frame"])
 
-    reference = apply_moves(CubeState.solved(), frame)
+    reference = _fb_target()
     assert fb_after.center[4] == reference.center[4]
     state = fb_after
     phase_centers = [state.center]
@@ -481,15 +531,37 @@ def test_roux_full_solution_contains_cmll_and_lse() -> None:
     assert after.eo == result.metadata["l4e_state"]["eo"]
 
 
-def test_first_block_accepts_white_bottom_without_fixing_white_center() -> None:
+def test_first_block_uses_all_search_frames_and_white_bottom_stickers() -> None:
     cube = scrambled("R U R' F2 D L2 B")
     result = RouxSolver(fb_timeout_seconds=10).solve(cube)
     after = apply_moves(cube, result.moves)
     assert first_block_solved(after)
     assert result.metadata["white_bottom"] is True
+    # The FB bottom is encoded by the orientations of DL/DFL/DBL, not by D's center.
     assert result.metadata["fb_side"] == "left"
     assert_rotation_prefix_only(result.moves)
     assert [phase.name for phase in result.phases[-4:]] == ["CMLL", "EO", "ULUR", "L4E"]
+
+
+def test_roux_solves_when_input_white_center_starts_on_a_side_face() -> None:
+    cube = apply_moves(scrambled("R U"), ("z",))
+    assert cube.center.index(0) not in (0, 3)
+
+    result = RouxSolver(fb_timeout_seconds=15, sb_timeout_seconds=15).solve(cube)
+    after = apply_moves(cube, result.moves)
+    target = _fb_target()
+
+    assert result.verified is True
+    assert result.metadata["frame_group_size"] == 24
+    assert result.metadata["compatible_frame_count"] == 24
+    assert result.metadata["searched_frame_count"] == 24
+    assert result.metadata["input_white_center_position"] == cube.center.index(0)
+    assert result.metadata["white_bottom"] is True
+    assert after.cp == target.cp
+    assert after.co == target.co
+    assert after.ep == target.ep
+    assert after.eo == target.eo
+    assert after.center == target.center
 
 
 def test_first_block_respects_depth_limit() -> None:
@@ -497,13 +569,13 @@ def test_first_block_respects_depth_limit() -> None:
     try:
         RouxSolver(fb_max_depth=0).solve(cube)
     except RuntimeError as exc:
-        assert "white-bottom frames" in str(exc)
+        assert "all 24 cube orientations" in str(exc)
     else:
         raise AssertionError("expected First Block depth limit failure")
 
 
 def test_second_block_exact_search_uses_partial_goal_projection() -> None:
-    target = apply_moves(CubeState.solved(), _fb_frame(0))
+    target = _fb_target()
     cube = apply_moves(target, ("R",))
     search = _SecondBlockSearch(target=target, max_depth=2, timeout_seconds=5)
     moves = search.solve(cube)
@@ -512,7 +584,7 @@ def test_second_block_exact_search_uses_partial_goal_projection() -> None:
 
 
 def test_second_block_exact_search_is_exact_for_all_one_move_cases() -> None:
-    target = apply_moves(CubeState.solved(), _fb_frame(0))
+    target = _fb_target()
     cases = (
         ("U", "U'"), ("U2", "U2"), ("U'", "U"),
         ("R", "R'"), ("R2", "R2"), ("R'", "R"),
@@ -532,7 +604,7 @@ def test_roux_phase_boundaries_are_verified_end_to_end() -> None:
     cube = scrambled("R U R' F2 D")
     result = RouxSolver(fb_timeout_seconds=15, sb_timeout_seconds=15).solve(cube)
     frame = _fb_frame(result.metadata["frame"])
-    reference = apply_moves(CubeState.solved(), frame)
+    reference = _fb_target_for_frame(frame)
 
     state = cube
     phase_states = {}
@@ -542,9 +614,9 @@ def test_roux_phase_boundaries_are_verified_end_to_end() -> None:
 
     # Phase-boundary states are the literal results of applying each phase;
     # center permutation is checked at every handoff, not normalized after EO.
-    assert _fb_cubies_goal(phase_states["First Block"], reference)
+    assert _fb_cubies_goal(phase_states["First Block"], _fb_target())
     assert phase_states["First Block"].center == result.metadata["fb_center_state"]
-    assert phase_states["First Block"].center[4] == reference.center[4]
+    assert phase_states["First Block"].center[4] == _fb_target().center[4]
     assert second_block_solved(phase_states["Second Block"])
     assert _centers_ready_for_eo_state(phase_states["Second Block"])
     assert phase_states["Second Block"].cp == result.metadata["sb_state"]["cp"]
@@ -574,7 +646,7 @@ def test_fb_allows_non_fb_centers_to_permute_but_preserves_fb_center_colors() ->
     scramble = "F2 L2 B2 F2 U R2 D2 L2 U2 F2 R2 F' U' L' D2 R U R U' F2 L"
     cube = scrambled(scramble)
     frame = _fb_frame(0)
-    reference = apply_moves(CubeState.solved(), frame)
+    reference = _fb_target()
     old_fb = frame + ("F", "R", "L2", "u'", "L", "F", "L")
     after_fb = apply_moves(cube, old_fb)
 
@@ -600,7 +672,7 @@ def test_user_fb_sequence_only_fails_when_l_center_mismatches() -> None:
     cube = scrambled("B2 D2 L2 D' F' U D B2 R' B' D2 F U2 D2 F U2 B' R2 F R2")
     user_fb = ("x2", "y'", "F'", "U", "B'", "u2", "M2", "B'")
     after_fb = apply_moves(cube, user_fb)
-    reference = apply_moves(CubeState.solved(), _fb_frame(1))
+    reference = _fb_target_for_frame(("x2", "y"))
 
     assert _fb_cubies_goal(after_fb, reference)
     # Other centers differ, but the L center still matches the FB.
@@ -616,7 +688,7 @@ def test_roux_tracks_centers_at_fb_boundary_without_repair_moves() -> None:
     cube = scrambled(scramble)
     result = RouxSolver(fb_timeout_seconds=15, sb_timeout_seconds=15).solve(cube)
     frame = _fb_frame(result.metadata["frame"])
-    reference = apply_moves(CubeState.solved(), frame)
+    reference = _fb_target_for_frame(frame)
     fb_moves = result.phases[0].moves
     after_fb = apply_moves(cube, fb_moves)
 
@@ -643,7 +715,7 @@ def test_roux_fb_regression_tracks_centers_for_reported_scramble() -> None:
     cube = scrambled(scramble)
     result = RouxSolver(fb_timeout_seconds=20, sb_timeout_seconds=20).solve(cube)
     frame = _fb_frame(result.metadata["frame"])
-    reference = apply_moves(CubeState.solved(), frame)
+    reference = _fb_target_for_frame(frame)
     after_fb = apply_moves(cube, result.phases[0].moves)
 
     assert result.verified is True

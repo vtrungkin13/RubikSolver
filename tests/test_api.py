@@ -43,7 +43,9 @@ def test_solve_endpoint_returns_verified_solution() -> None:
     assert payload["verified"] is True
     assert payload["move_count"] > 0
     assert len(payload["initial_state"]) == 54
-    assert len(payload["step_states"]) == payload["move_count"] + 1
+    # Playback still has one state per executable token, including x/y/z
+    # rotations, even though those rotations are excluded from move_count.
+    assert len(payload["step_states"]) == len(payload["moves"].split()) + 1
     assert payload["step_states"][0] == payload["initial_state"]
     assert payload["step_states"][-1] == payload["final_state"]
     assert payload["final_is_solved"] is True
@@ -56,6 +58,10 @@ def test_cfop_final_state_accepts_a_rotated_whole_cube_frame() -> None:
     payload = response.json()
     assert payload["verified"] is True
     assert payload["final_is_solved"] is True
+    rotations = {"x", "x2", "x'", "y", "y2", "y'", "z", "z2", "z'"}
+    assert payload["move_count"] == sum(
+        move not in rotations for move in payload["moves"].split()
+    )
 
 
 def test_solve_endpoint_accepts_extended_notation() -> None:

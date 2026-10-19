@@ -126,7 +126,8 @@ def solve(request: SolveRequest) -> dict[str, object]:
         "method": solution.method,
         "scramble": normalize_scramble(request.scramble),
         "moves": " ".join(solution_moves),
-        "move_count": len(solution_moves),
+        # Whole-cube rotations (x/y/z) are setup notation, not counted turns.
+        "move_count": solution.move_count,
         "metric": solution.metric,
         "verified": solution.verified,
         "initial_state": initial_state,

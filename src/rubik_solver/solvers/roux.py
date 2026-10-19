@@ -7,7 +7,7 @@ from itertools import permutations
 from pathlib import Path
 from time import monotonic
 
-from rubik_solver.cube.moves import MOVES, apply_move, apply_moves, inverse_move
+from rubik_solver.cube.moves import MOVES, apply_move, apply_moves, inverse_move, normalize_moves
 from rubik_solver.cube.state import CubeState
 from rubik_solver.model.solution import Solution, SolutionPhase
 from rubik_solver.solvers.base import Solver
@@ -25,8 +25,9 @@ _ROUX_EXTRA_MOVES = ("r", "r2", "r'", "M", "M2", "M'")
 # too, and treat all of these as normal construction moves (not rotations).
 _ROUX_WIDE_MOVES = ("u", "u2", "u'")
 _ROUX_MOVES = _ALL_MOVES + _ROUX_EXTRA_MOVES + _ROUX_WIDE_MOVES
-# FB completion requires the left-block cubies and matching L center only.
-# All other center positions are tracked in the resulting CubeState, not goals.
+# FB completion is defined by the left-block cubies and their sticker colors,
+# plus the matching L center. The white stickers on DL/DFL/DBL define the
+# white bottom; the white center itself is not an FB goal condition.
 _FB_MOVES = _ROUX_MOVES
 _SB_MOVES = (
     "U", "U2", "U'",
@@ -48,12 +49,13 @@ _SB_MOVE_PENALTY = {
     **{move: 6 for move in ("B", "B2", "B'", "D", "D2", "D'")},
 }
 
-# A Roux FB is a 1x2x3 block on the LEFT. Only its L center is a center goal;
-# the other five center positions are tracked but do not gate FB completion.
+# A Roux FB is a 1x2x3 block on the LEFT. Its L center must match the block.
+# The white bottom is defined by the D-facing stickers of DL, DFL and DBL,
+# not by the position of the white center. Other centers are unconstrained.
 # Center tuple order is U, R, F, D, L, B.
 _FB_CORNER_GOALS = (5, 6)  # DLF, DBL
 _FB_EDGE_GOALS = (6, 9, 10)  # DL, FL, BL
-_FB_CENTER_COLOR_POSITIONS = (4,)  # L only
+_FB_CENTER_COLOR_POSITIONS = (4,)  # matching L center only; white center is irrelevant
 _SB_CORNER_GOALS = (4, 7)  # DFR, DBR
 _SB_EDGE_GOALS = (4, 8, 11)  # DR, FR, BR
 # Canonical cubie sticker order, in face indices U, R, F, D, L, B.
@@ -68,10 +70,78 @@ _L4E_EDGE_GOALS = (1, 3, 5, 7)  # UF, UB, DF, DB
 _ULUR_EDGE_GOALS = (0, 2)  # UR, UL
 
 
+_ROTATION_MOVES = ("x", "x2", "x'", "y", "y2", "y'", "z", "z2", "z'")
+
+
+def _build_cube_rotation_frames() -> tuple[tuple[str, ...], ...]:
+    """Build all 24 distinct whole-cube orientations, shortest prefix first."""
+    solved_centers = CubeState.solved().center
+    rotation_permutations = {
+        move: apply_move(CubeState.solved(), move).center
+        for move in _ROTATION_MOVES
+    }
+    queue = deque([((), solved_centers)])
+    seen = {solved_centers: ()}
+    while queue:
+        prefix, centers = queue.popleft()
+        for move in _ROTATION_MOVES:
+            permutation = rotation_permutations[move]
+            next_centers = tuple(centers[permutation[pos]] for pos in range(6))
+            if next_centers in seen:
+                continue
+            next_prefix = prefix + (move,)
+            seen[next_centers] = next_prefix
+            queue.append((next_prefix, next_centers))
+    if len(seen) != 24:
+        raise RuntimeError(f"Expected 24 distinct cube orientations, got {len(seen)}")
+    # Preserve the historical yaw frame order first for deterministic
+    # tie-breaks. The remaining orientations follow in shortest-prefix order.
+    legacy = (("x2",), ("x2", "y"), ("x2", "y2"), ("x2", "y'"))
+
+    def orientation_key(sequence: tuple[str, ...]) -> tuple[int, ...]:
+        centers = solved_centers
+        for move in sequence:
+            permutation = rotation_permutations[move]
+            centers = tuple(centers[permutation[pos]] for pos in range(6))
+        return centers
+
+    legacy_keys = {orientation_key(sequence) for sequence in legacy}
+    remaining = [sequence for centers, sequence in seen.items() if centers not in legacy_keys]
+    remaining.sort(key=lambda moves: (len(moves), moves))
+    return (*legacy, *remaining)
+
+
+_FB_FRAMES = _build_cube_rotation_frames()
+# Canonical reference for the physical Roux solution: white remains on D.
+# Search frames are coordinate transforms and never change this completion target.
+_FB_TARGET = apply_moves(CubeState.solved(), ("x2",))
+_FB_FRAME_TARGETS = tuple(apply_moves(CubeState.solved(), frame) for frame in _FB_FRAMES)
+
+
 def _fb_frame(frame: int) -> tuple[str, ...]:
-    frame %= 4
-    y = ((), ("y",), ("y2",), ("y'",))[frame]
-    return ("x2",) + y
+    """Return one of the 24 whole-cube setup orientations."""
+    return _FB_FRAMES[frame % len(_FB_FRAMES)]
+
+
+def _fb_frame_indices_for_cube(cube: CubeState) -> tuple[int, ...]:
+    """Return all 24 valid setup orientations, independent of center colors."""
+    del cube  # Frame validity is geometric; center placement is not a filter.
+    return tuple(range(len(_FB_FRAMES)))
+
+
+def _fb_target() -> CubeState:
+    """Return the canonical cubie target encoding a white-sticker FB bottom."""
+    return _FB_TARGET
+
+
+def _fb_target_for_frame(frame: tuple[str, ...]) -> CubeState:
+    """Return the solved reference in this physical setup orientation.
+
+    The target's L center defines the color of the left FB block. Other centers
+    are tracked as real state, but are not FB goal conditions. No face color
+    (including white on D) is required to validate a setup frame.
+    """
+    return apply_moves(CubeState.solved(), frame)
 
 
 def _fb_cubies_goal(cube: CubeState, reference: CubeState) -> bool:
@@ -85,7 +155,12 @@ def _fb_cubies_goal(cube: CubeState, reference: CubeState) -> bool:
 
 
 def _fb_goal(cube: CubeState, reference: CubeState) -> bool:
-    """Return whether FB cubies are solved and the L center matches the block."""
+    """Return whether FB cubies are solved and the L center matches the block.
+
+    The reference cubie orientations encode white stickers on the D-facing
+    sides of DL, DFL and DBL. The white center's position is deliberately not
+    part of this predicate.
+    """
     return _fb_cubies_goal(cube, reference) and all(
         cube.center[pos] == reference.center[pos]
         for pos in _FB_CENTER_COLOR_POSITIONS
@@ -93,57 +168,45 @@ def _fb_goal(cube: CubeState, reference: CubeState) -> bool:
 
 
 def _fb_search_goal(cube: CubeState, reference: CubeState) -> bool:
-    """Require the FB cubies and L center only; track all centers separately."""
+    """Require the FB cubies/sticker orientations and matching L center."""
     return _fb_goal(cube, reference)
 
 
 def _fb_centers_match_frame(moves: tuple[str, ...], frame: tuple[str, ...]) -> bool:
-    """Return whether the physical FB sequence leaves the L center in-frame."""
+    """Return whether the physical FB sequence leaves the L center at target."""
     actual = apply_moves(CubeState.solved(), moves)
-    expected = apply_moves(CubeState.solved(), frame)
+    expected = _fb_target_for_frame(frame)
     return actual.center[4] == expected.center[4]
 
 
 def first_block_solved(cube: CubeState, frame_index: int | None = None) -> bool:
-    """Return whether the Roux FB is solved in the requested frame.
+    """Return whether the canonical Roux FB is solved with a white-sticker bottom.
 
-    With ``frame_index`` omitted this remains a convenient generic predicate
-    for callers that do not track the active setup frame. Solver verification
-    should always pass the exact frame selected for the current solve.
+    ``frame_index`` is retained for API compatibility; frames are setup
+    rotations, not alternate completion targets.
     """
+    del frame_index
     if cube.is_solved():
         return True
-    solved = CubeState.solved()
-    if frame_index is not None:
-        reference = apply_moves(solved, _fb_frame(frame_index))
-        # This predicate is also used after later Roux phases, whose slice
-        # moves may permute modeled centers while preserving the FB cubies.
-        return _fb_cubies_goal(cube, reference)
-    for frame_index in range(4):
-        frame = _fb_frame(frame_index)
-        reference = apply_moves(solved, frame)
-        if _fb_cubies_goal(cube, reference):
-            return True
-    return False
+    return _fb_goal(cube, _fb_target())
 
 
-def second_block_solved(cube: CubeState) -> bool:
+def second_block_solved(cube: CubeState, reference: CubeState | None = None) -> bool:
     """Return whether the canonical right Roux 1x2x3 block is solved.
 
-    This check intentionally also requires one of the four possible white-
-    bottom FB frames, because SB is only meaningful as an extension of the
-    already-solved left block.
+    If a frame target is supplied, verify only against that active frame.
+    Without one, accept any of the 24 geometric frame targets for generic
+    callers and tests.
     """
-    solved = CubeState.solved()
-    for frame_index in range(4):
-        reference = apply_moves(solved, _fb_frame(frame_index))
-        if _fb_cubies_goal(cube, reference) and all(
-            cube.cp[pos] == reference.cp[pos] and cube.co[pos] == reference.co[pos]
+    references = (reference,) if reference is not None else _FB_FRAME_TARGETS
+    for target in references:
+        if _fb_cubies_goal(cube, target) and all(
+            cube.cp[pos] == target.cp[pos] and cube.co[pos] == target.co[pos]
             for pos in _SB_CORNER_GOALS
         ) and all(
-            cube.ep[pos] == reference.ep[pos] and cube.eo[pos] == reference.eo[pos]
+            cube.ep[pos] == target.ep[pos] and cube.eo[pos] == target.eo[pos]
             for pos in _SB_EDGE_GOALS
-        ) and _u_corners_on_u_layer(cube, reference):
+        ) and _u_corners_on_u_layer(cube, target):
             return True
     return False
 
@@ -1874,7 +1937,7 @@ def _fb_frame_pattern_score(cube: CubeState, frame: tuple[str, ...]) -> tuple[in
     are the most useful human-style starts. A 1x3 line is the next preference;
     this score is deliberately evaluated before solution length.
     """
-    reference = apply_moves(CubeState.solved(), frame)
+    reference = _fb_target_for_frame(frame)
     patterns = _fb_pattern_snapshot(apply_moves(cube, frame), reference)
     dl_pairs = sum(name in patterns for name in ("CE-pair-DLF-DL", "CE-pair-DBL-DL"))
     side_ctrs = sum(name in patterns for name in ("Ctr-FL", "Ctr-BL"))
@@ -2107,14 +2170,17 @@ def _staged_fb_candidate(
                     failed = True
                     break
                 state = apply_moves(state, stage_moves)
-                all_moves.extend(stage_moves)
+                # Stage planners are independent and can end/start with turns
+                # of the same face. Canonicalize the accumulated path at each
+                # handoff so equivalent turns never leak into the FB output.
+                all_moves[:] = normalize_moves((*all_moves, *stage_moves))
                 nodes += search.nodes
                 if kind == "square":
                     square_moves_count = len(stage_moves)
             if failed:
                 continue
 
-            physical_moves = frame + tuple(all_moves)
+            physical_moves = normalize_moves((*frame, *all_moves))
             if not _fb_search_goal(apply_moves(cube, physical_moves), reference):
                 continue
             candidates.append((physical_moves, nodes, rank((first_corner, first_edge)), square_moves_count))
@@ -2256,10 +2322,14 @@ class RouxSolver(Solver):
             return Solution(method=self.method, moves=(), verified=True)
 
         candidates = []
-        for frame_index in range(4):
+        compatible_frames = _fb_frame_indices_for_cube(cube)
+        for frame_index in compatible_frames:
             frame = _fb_frame(frame_index)
             framed = apply_moves(cube, frame)
-            reference = apply_moves(CubeState.solved(), frame)
+            # The frame rotates the physical cube for search, but the goal is
+            # always the canonical FB cubie target with white stickers on the
+            # D-facing sides of DL/DFL/DBL. The white center is not the goal.
+            reference = _fb_target()
 
             # Primary planner: recognition/ranking -> 1x1x3 line -> 1x2x2
             # square -> remaining pair. The staged result supplies an upper
@@ -2295,7 +2365,7 @@ class RouxSolver(Solver):
                 inner_moves = None
 
             if inner_moves is not None:
-                physical_moves = frame + inner_moves
+                physical_moves = normalize_moves((*frame, *inner_moves))
                 candidates.append((len(physical_moves), frame_index, physical_moves, search, "exact"))
 
             if staged_candidate is not None:
@@ -2310,7 +2380,10 @@ class RouxSolver(Solver):
             # is therefore setup length, then HTM length, then frame index.
 
         if not candidates:
-            raise RuntimeError("Roux First Block search failed in all four white-bottom frames")
+            raise RuntimeError(
+                "Roux First Block search failed in all 24 cube orientations "
+                f"(searched {len(compatible_frames)} frames; no frame met the FB goal within limits)"
+            )
 
         # Human-style phase boundary: FB is optimized in isolation. Do not
         # inspect or score SB while selecting the FB. Once the shortest valid
@@ -2320,19 +2393,27 @@ class RouxSolver(Solver):
         selected_fb = min(
             candidates,
             key=lambda item: (
+                # FB is ranked independently of downstream center placement.
+                # The post-SB center check/setup before EO handles the LSE axis;
+                # do not bias frame selection toward white/yellow on U/D here.
+                # Prefer frames exposing reusable FB structures, then preserve
+                # useful U-corner placement when other criteria are equal.
+                tuple(-value for value in _fb_frame_pattern_score(cube, _fb_frame(item[1]))),
                 not _u_corners_on_u_layer(
                     apply_moves(cube, item[2]),
-                    apply_moves(CubeState.solved(), _fb_frame(item[1])),
+                    _fb_target(),
                 ),
-                tuple(-value for value in _fb_frame_pattern_score(cube, _fb_frame(item[1]))),
                 item[4] != "staged",
-                _fb_move_style_score(item[2]),
                 item[0],
+                _fb_move_style_score(item[2]),
                 item[1],
             ),
         )
         _, candidate_frame, candidate_fb, candidate_search, candidate_planner = selected_fb
-        candidate_reference = apply_moves(CubeState.solved(), _fb_frame(candidate_frame))
+        candidate_fb = normalize_moves(candidate_fb)
+        # The frame is a physical setup rotation, but every candidate solves
+        # to the canonical white-bottom-sticker target, never to the rotated target.
+        candidate_reference = _fb_target()
         candidate_after = apply_moves(cube, candidate_fb)
         # This is the real post-FB state. Keep its center permutation as well
         # as its cubies; downstream phases must receive the state produced by
@@ -2366,18 +2447,19 @@ class RouxSolver(Solver):
         candidate_sb_moves, eo_setup = _optimize_sb_final_move_for_eo(
             candidate_after, candidate_reference, tuple(staged_sb_moves)
         )
+        candidate_sb_moves = normalize_moves(candidate_sb_moves)
         staged_sb.opportunity = {**staged_sb.opportunity, "eo_setup": eo_setup}
         candidate_sb_after = apply_moves(candidate_after, candidate_sb_moves)
-        if not second_block_solved(candidate_sb_after):
+        if not second_block_solved(candidate_sb_after, candidate_reference):
             raise RuntimeError("Roux Second Block planner produced an invalid SB candidate")
         if (candidate_sb_after.center[1], candidate_sb_after.center[4]) != (candidate_after.center[1], candidate_after.center[4]):
             raise RuntimeError("Roux Second Block changed the fixed R/L centers")
 
         fb_after = apply_moves(cube, candidate_fb)
-        if not first_block_solved(fb_after, candidate_frame):
+        if not first_block_solved(fb_after):
             raise RuntimeError("Roux First Block failed phase-state verification")
         verified_sb_after = apply_moves(fb_after, candidate_sb_moves)
-        if not second_block_solved(verified_sb_after):
+        if not second_block_solved(verified_sb_after, candidate_reference):
             raise RuntimeError("Roux Second Block failed phase-state verification")
         if not _fb_cubies_goal(verified_sb_after, candidate_reference):
             raise RuntimeError("Roux Second Block changed the First Block")
@@ -2386,7 +2468,7 @@ class RouxSolver(Solver):
         # validated, continue with the existing CMLL and LSE solvers. These
         # later phases do not influence FB/SB candidate selection.
         cmll = _CMLLDatabase(candidate_reference)
-        if not second_block_solved(verified_sb_after) or not _u_corners_on_u_layer(
+        if not second_block_solved(verified_sb_after, candidate_reference) or not _u_corners_on_u_layer(
             verified_sb_after, candidate_reference
         ):
             raise RuntimeError(
@@ -2396,7 +2478,7 @@ class RouxSolver(Solver):
             )
         try:
             cmll_case, _ = cmll.recognize(verified_sb_after)
-            cmll_moves = cmll.solve(verified_sb_after)
+            cmll_moves = normalize_moves(cmll.solve(verified_sb_after))
             cmll_recognition_error = None
         except RuntimeError as exc:
             # Keep solving valid SB states while making the database gap
@@ -2408,7 +2490,7 @@ class RouxSolver(Solver):
                 "id": "TWO_LOOK",
                 "family": "Explicit two-look coverage",
             }
-            cmll_moves = _cmll_two_look(verified_sb_after, candidate_reference)
+            cmll_moves = normalize_moves(_cmll_two_look(verified_sb_after, candidate_reference))
         cmll_after = apply_moves(verified_sb_after, cmll_moves)
         if (
             not _roux_blocks_and_cmll_solved(cmll_after, candidate_reference)
@@ -2417,19 +2499,20 @@ class RouxSolver(Solver):
             raise RuntimeError("Roux CMLL failed corner or fixed R/L center verification")
 
         lse = _LSEFormulaDatabase()
-        # EO handoff: the U center must be white or yellow. If neither is on U,
-        # apply M' first, then recognize EO from the resulting real cube state.
+        # EO handoff: U must contain one of the active frame's U/D center
+        # colors. If neither is on U, apply M' and recognize EO from the real
+        # resulting state. Do not hard-code white/yellow for rotated frames.
         # Keep this setup move inside the EO phase so it executes immediately
         # before the selected EO algorithm.
         eo_setup_moves: tuple[str, ...] = ()
         eo_input = cmll_after
-        if eo_input.center[0] not in (0, 3):
+        if eo_input.center[0] not in (candidate_reference.center[0], candidate_reference.center[3]):
             eo_setup_moves = ("M'",)
             eo_input = apply_moves(eo_input, eo_setup_moves)
-        if eo_input.center[0] not in (0, 3):
-            raise RuntimeError("Roux EO handoff failed to place the white/yellow center on U after M'")
+        if eo_input.center[0] not in (candidate_reference.center[0], candidate_reference.center[3]):
+            raise RuntimeError("Roux EO handoff failed to place an active U/D center on U after M'")
         eo_case, recognized_eo_moves = lse.solve_eo(eo_input, candidate_reference)
-        eo_moves = eo_setup_moves + tuple(recognized_eo_moves)
+        eo_moves = normalize_moves((*eo_setup_moves, *recognized_eo_moves))
         eo_after = apply_moves(cmll_after, eo_moves)
         if (
             not _roux_blocks_and_cmll_solved(eo_after, candidate_reference)
@@ -2439,7 +2522,7 @@ class RouxSolver(Solver):
             raise RuntimeError("Roux EO failed block/CMLL preservation, edge orientation, or fixed R/L center verification")
 
         ulur_search = _ULURIDAStar(target=candidate_reference)
-        ulur_moves = ulur_search.solve(eo_after)
+        ulur_moves = normalize_moves(ulur_search.solve(eo_after))
         ulur_case = {
             "id": "IDA_STAR",
             "family": "M/U",
@@ -2451,7 +2534,7 @@ class RouxSolver(Solver):
             raise RuntimeError("Roux ULUR failed UL/UR or fixed R/L center verification")
 
         l4e_search = _L4EIDAStar(target=candidate_reference)
-        l4e_moves = l4e_search.solve(ulur_after)
+        l4e_moves = normalize_moves(l4e_search.solve(ulur_after))
         l4e_case = {
             "id": "IDA_STAR",
             "family": "M/U",
@@ -2469,10 +2552,14 @@ class RouxSolver(Solver):
         # L4E is the final phase: require the complete physical cube state to
         # match the active-frame target, including all six centers.
 
-        all_moves = (
+        # Keep the public one-line solution canonical even when a phase
+        # boundary happens to split two turns of the same face. Individual
+        # phases remain independently normalized so their verified handoff
+        # states and step-by-step playback are preserved.
+        all_moves = normalize_moves((
             tuple(candidate_fb) + candidate_sb_moves + tuple(cmll_moves)
             + tuple(eo_moves) + tuple(ulur_moves) + tuple(l4e_moves)
-        )
+        ))
         return Solution(
             method=self.method,
             moves=all_moves,
@@ -2482,11 +2569,7 @@ class RouxSolver(Solver):
                 SolutionPhase(
                     name="First Block",
                     moves=tuple(candidate_fb),
-                    description=(
-                        "Setup rotation comes first (see metadata.fb_setup_moves). "
-                        "Physically rotate the cube by that setup, then execute the "
-                        "remaining First Block construction moves."
-                    ),
+                    description="Apply the selected setup rotation, then solve the left Roux block with white bottom stickers on DL/DFL/DBL.",
                 ),
                 SolutionPhase(
                     name="Second Block",
@@ -2582,11 +2665,15 @@ class RouxSolver(Solver):
                 "l4e_family": l4e_case["family"],
                 "l4e_nodes": l4e_search.nodes,
                 "frame": candidate_frame,
+                "frame_group_size": len(_FB_FRAMES),
+                "compatible_frame_count": len(compatible_frames),
+                "searched_frame_count": len(compatible_frames),
+                "input_white_center_position": cube.center.index(0),
                 "fb_setup_moves": _fb_frame(candidate_frame),
                 "fb_construction_moves": tuple(candidate_fb[len(_fb_frame(candidate_frame)):]),
                 "fb_execution_order": "setup_rotation_then_construction",
                 "planner": candidate_planner,
-                "white_bottom": True,
+                "white_bottom": _fb_goal(candidate_after, candidate_reference),
                 "rotation_policy": "setup-prefix-only",
                 "fb_side": "left",
                 "phases": ("First Block", "Second Block", "CMLL", "EO", "ULUR", "L4E"),

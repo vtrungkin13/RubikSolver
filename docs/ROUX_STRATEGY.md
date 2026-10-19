@@ -16,13 +16,59 @@ Solver chạy đủ sáu phase và kiểm tra trạng thái sau từng phase. Kh
 - Mỗi phase phải kiểm tra điều kiện đích trước khi tiếp tục. Lỗi phải chỉ ra phase thất bại; không âm thầm chuyển sang phương pháp giải khác.
 - Giới hạn độ sâu, số node và thời gian là giới hạn tài nguyên; chúng không thay thế bước xác minh trạng thái.
 
+## Quyết định thiết kế: FB xét đủ 24 frame, đáy trắng theo sticker của cubie
+
+Phần này mô tả hợp đồng triển khai cho cơ chế frame FB và tiêu chí cần giữ khi phát triển tiếp.
+
+### Mục tiêu và phạm vi
+
+- Solver xét đủ 24 hướng xoay toàn khối; không loại frame theo vị trí tâm trắng hoặc màu của bất kỳ tâm nào.
+- Mỗi frame là một phép xoay setup vật lý ở đầu lời giải; trạng thái sau setup được giải về cùng target chuẩn, không phải target solved xoay theo frame.
+- Target cubie của FB luôn là `_FB_TARGET`. Màu trắng ở đáy được xác định bởi sticker mặt D của các viên DL, DFL và DBL; không phải bởi vị trí tâm trắng. Frame tìm kiếm không được phép đổi định nghĩa màu đáy hoặc thay đổi target dùng bởi các phase sau.
+- Goal FB gồm góc DLF, DBL; cạnh DL, FL, BL; và tâm L đúng màu với block. Hướng cubie trong target bảo đảm sticker mặt D của DL, DFL và DBL đều màu trắng. Vị trí tâm trắng không phải điều kiện goal; các tâm khác vẫn được theo dõi.
+- Xét đủ 24 hướng xoay của khối lập phương: 6 lựa chọn hướng cho trục D nhân 4 hướng xoay quanh trục đó. Setup rotation được đưa vào đầu lời giải; không dùng frame để thay đổi target vật lý.
+- Không suy luận vị trí tâm trắng từ chỉ số frame. Frame mô tả ánh xạ vị trí/mặt; `CubeState.center` vẫn là trạng thái tâm thực tế sau các move đã thực thi.
+
+### Tách ba khái niệm
+
+Khi triển khai, phải tách riêng ba khái niệm hiện đang gắn với nhau trong luồng FB:
+
+1. **Frame tìm kiếm (`search_frame`)**: một trong 24 setup rotation; mọi frame đều được xét, bất kể vị trí tâm trắng ban đầu.
+2. **Goal FB (`fb_goal`)**: các góc/cạnh và hướng sticker của block trái, bảo đảm mặt đáy của DL/DFL/DBL màu trắng, cùng tâm L đúng màu. Không áp đặt vị trí tâm trắng.
+3. **Target hoàn chỉnh (`completion_target`)**: là target toàn khối được giữ nguyên xuyên suốt SB, CMLL, EO, ULUR, L4E. Target cuối có thể ràng buộc cả sáu tâm; điều đó không biến vị trí tâm trắng thành điều kiện hoàn thành FB.
+
+Sau khi chọn frame, target cố định phải được truyền xuyên suốt SB, CMLL, EO, ULUR, L4E. Không được để mỗi phase tự chọn một frame/target khác.
+
+### Hợp đồng giữa các phase
+
+- **FB:** xét đủ 24 frame, hoàn thành block với sticker mặt D của DL/DFL/DBL màu trắng và tâm L đúng màu. Không yêu cầu tâm trắng ở D. Setup rotation được đưa vào đầu lời giải; các tâm vẫn được theo dõi theo trạng thái thực. Việc kiểm tra/điều chỉnh tâm cho EO diễn ra sau SB, ngay trước EO. Lưu trạng thái thực của cubie và cả sáu tâm.
+- **SB:** slot của block phải được ánh xạ theo frame FB đã chọn. Điều kiện giữ nguyên FB và kiểm tra SB phải dùng cùng frame, không mặc định chỉ có bốn frame trắng-ở-D của cách triển khai cũ.
+- **CMLL:** tập góc tầng U và cách nhận diện AUF phải được diễn giải theo frame hoạt động. Không được dùng target được tạo từ frame khác với target SB.
+- **EO:** điều kiện tâm U/D và định hướng cạnh phải được xác định theo frame hoạt động. Quy tắc hiện tại chèn `M'` khi tâm U không phải trắng/vàng không được giữ nguyên một cách máy móc nếu frame mới khiến quy ước U/D khác đi; phải chứng minh và kiểm thử invariant trước khi dùng.
+- **ULUR/L4E:** IDA* phải nhận cùng target hoạt động. L4E chỉ thành công khi toàn bộ cubie và sáu tâm khớp target đó; không được chấp nhận trạng thái cubie đúng nhưng tâm sai.
+
+### Tránh duyệt trùng và giới hạn tài nguyên
+
+- Sinh 24 phép quay hợp lệ, kiểm tra chúng là các hướng khác nhau và có ánh xạ thuận/nghịch nhất quán. Chuẩn hóa/deduplicate các frame nếu cách biểu diễn tạo ra cùng một ánh xạ.
+- Tất cả 24 frame đều được đưa vào planner. Theo dõi số frame, node và thời gian; giới hạn tài nguyên không chứng minh tối ưu toàn cục.
+
+### Tiêu chí nghiệm thu
+
+1. Có unit test cho tập frame: đủ 24 hướng phân biệt, mọi frame ánh xạ đúng các mặt và có nghịch đảo hợp lệ.
+2. Có test FB cho các trạng thái mà tâm trắng ban đầu nằm lần lượt trên U/R/F/D/L/B; frame không bị lọc theo vị trí tâm trắng.
+3. Sau FB, xác minh các góc/cạnh và hướng sticker theo target chuẩn, bảo đảm mặt đáy của DL/DFL/DBL màu trắng, tâm L đúng màu block; vị trí tâm trắng không phải điều kiện FB.
+4. Chạy regression toàn pipeline trên scramble chuẩn và kiểm tra trạng thái thực sau từng phase, đặc biệt SB không phá FB và L4E giải đúng toàn bộ cubie cùng sáu tâm.
+5. Nếu một frame chưa được các phase sau hỗ trợ đầy đủ, solver phải từ chối frame đó một cách tường minh hoặc báo lỗi phase có nguyên nhân; không được trả lời thành công giả.
+
+**Lưu ý:** việc mở rộng sang 24 frame cần đồng bộ target, metadata, xác minh từng phase và target L4E; chỉ tăng số frame mà giữ target cũ là không đủ.
+
 ## 1. First Block (FB)
 
-1. Xét bốn frame Roux có trục trắng/vàng ở hướng dự kiến.
+1. Sinh đủ 24 frame và thử setup rotation tương ứng. Với mỗi frame, tìm lời giải từ trạng thái sau setup về target cubie Roux chuẩn có sticker đáy trắng; không tạo target bằng cách xoay trạng thái solved theo frame.
 2. Với mỗi frame, chạy bộ dựng FB theo kiểu nhận diện cơ hội trước, sau đó chạy tìm kiếm chính xác có giới hạn để tìm cách cải thiện lời giải dựng được.
 3. Bộ dựng theo giai đoạn tận dụng cấu trúc đang có: quan hệ cạnh–tâm, cặp góc–cạnh đã ghép, hình vuông (1×2×2), và đường (1×1×3). Trình tự ưu tiên là tạo/giữ đường (1×1×3) khi khả thi, tạo hình vuông (1×2×2), rồi hoàn tất cặp góc–cạnh còn lại. Nếu nhánh giữ đường không phù hợp, có thể xét cách dựng không giữ đường.
-4. Chỉ đưa các ứng viên FB hợp lệ vào danh sách. Thứ tự xếp hạng hiện tại ưu tiên: giữ các góc U trên tầng U, điểm nhận diện mẫu của frame, ứng viên từ bộ dựng theo giai đoạn khi các tiêu chí trước ngang nhau, độ thuận tay của chuỗi move, số move và chỉ số frame. Không dùng SB hay các phase sau trong điểm số.
-5. Nếu cần đổi hướng toàn khối để thiết lập frame, đưa phép xoay vào đầu lời giải; không xoay trả lại sau khi giải xong. Goal FB gồm các cubie của block và center L đúng màu theo frame. Không yêu cầu F/D/B/U/R khớp frame ở ranh giới FB; phải lưu snapshot đầy đủ của cả 6 center.
+4. Chỉ đưa các ứng viên FB hợp lệ vào danh sách. Thứ tự xếp hạng ưu tiên điểm nhận diện cấu trúc FB có sẵn của frame, giữ các góc U trên tầng U, ứng viên staged khi các tiêu chí trước ngang nhau, số move, độ thuận tay và chỉ số frame. Không dùng vị trí cặp tâm trắng/vàng để ưu tiên frame; bước kiểm tra tâm sau SB chịu trách nhiệm chuẩn bị trục cho EO. Không dùng SB, CMLL hay LSE để chấm điểm chất lượng FB.
+5. Đưa setup rotation được chọn vào đầu lời giải. Goal FB yêu cầu sticker mặt D của DL/DFL/DBL màu trắng và tâm L đúng màu theo target chuẩn; không yêu cầu tâm trắng ở D. Phải lưu snapshot đầy đủ của cả 6 center.
 
 Tìm kiếm FB có giới hạn, không đảm bảo lời giải FB ngắn nhất toàn cục. Tham số độ sâu/node/thời gian chỉ giới hạn tài nguyên.
 
@@ -120,3 +166,9 @@ Thành công cuối cùng đòi hỏi toàn bộ cubie và cả sáu tâm đư�
 - Không đưa direct SB hoặc Kociemba vào làm đường dự phòng.
 - Không tuyên bố tìm được FB tối ưu toàn cục chỉ từ tìm kiếm có giới hạn.
 - Không bỏ qua xác minh trạng thái thực tại ranh giới phase.
+
+### Chuẩn hóa chuỗi move
+
+- Mọi phase phải được chuẩn hóa sau khi ghép các đoạn tìm kiếm/công thức; các lượt liên tiếp cùng mặt được cộng số mũ modulo 4 (`F2 F'` → `F`, `R R'` → bỏ cả hai).
+- Chuỗi lời giải công khai cũng được chuẩn hóa toàn cục để không còn lượt cùng mặt đứng cạnh nhau, kể cả khi ranh giới phase chia cắt cặp lượt đó.
+- Chuẩn hóa không đổi thứ tự các mặt khác nhau. Trạng thái cuối sau khi áp dụng chuỗi chuẩn hóa phải vẫn khớp target và được kiểm chứng như trước.

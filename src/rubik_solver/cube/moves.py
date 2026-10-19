@@ -121,6 +121,36 @@ def apply_moves(cube: CubeState, moves: list[str] | tuple[str, ...]) -> CubeStat
     return state
 
 
+def normalize_moves(moves: list[str] | tuple[str, ...]) -> tuple[str, ...]:
+    """Combine adjacent turns of the same move family into canonical notation.
+
+    Examples: ``F2 F'`` -> ``F``, ``R R'`` -> nothing, and ``M M`` -> ``M2``.
+    This is intentionally local: it does not reorder moves or commute turns
+    across different faces, so the represented cube transformation is kept.
+    """
+    normalized: list[str] = []
+    powers = {"": 1, "2": 2, "'": 3}
+    notation = {0: None, 1: "", 2: "2", 3: "'"}
+
+    for move in moves:
+        if not move:
+            raise ValueError("Move notation cannot be empty")
+        face, suffix = move[0], move[1:]
+        if suffix not in powers:
+            raise ValueError(f"Unknown move notation: {move}")
+        if normalized and normalized[-1][0] == face:
+            previous = normalized.pop()
+            previous_power = powers[previous[1:]]
+            combined_power = (previous_power + powers[suffix]) % 4
+            combined_suffix = notation[combined_power]
+            if combined_suffix is not None:
+                normalized.append(face + combined_suffix)
+        else:
+            normalized.append(move)
+
+    return tuple(normalized)
+
+
 def inverse_move(move: str) -> str:
     if move.endswith("2"):
         return move
