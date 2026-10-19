@@ -294,11 +294,26 @@ def test_sb_default_search_has_no_move_depth_ceiling_and_scores_lookahead() -> N
     assert _sb_pair_lookahead_score(target, target, (4, 8)) < _sb_pair_lookahead_score(target, target, (7, 11))
 
 
-def test_cmll_database_has_42_unique_auf_equivalence_classes() -> None:
+def test_cmll_database_expands_cases_across_y_symmetry() -> None:
     target = CubeState.solved()
     db = _CMLLDatabase(target)
     assert len(db.entries) == 42
-    assert len(db._case_map) == 42
+    assert len(db._case_map) > 42
+
+
+def test_cmll_solver_does_not_hide_recognition_failure_with_two_look(monkeypatch) -> None:
+    import pytest
+
+    target = CubeState.solved()
+    db = _CMLLDatabase(target)
+    case = apply_moves(target, _cmll_inverse(tuple(db.entries[0]["algorithm"].split())))
+
+    def fail_recognition(_cube):
+        raise RuntimeError("synthetic recognizer regression")
+
+    monkeypatch.setattr(db, "recognize", fail_recognition)
+    with pytest.raises(RuntimeError, match="synthetic recognizer regression"):
+        db.solve(case)
 
 
 def test_all_42_cmll_cases_recognize_and_solve() -> None:
@@ -373,13 +388,39 @@ def test_all_42_cmll_cases_support_all_auf_rotations() -> None:
     target = CubeState.solved()
     db = _CMLLDatabase(target)
     for entry in db.entries:
-        case = apply_moves(target, _cmll_inverse(tuple(entry["algorithm"].split())))
-        for power in range(4):
-            rotated_case = apply_moves(case, _cmll_u_turn(power))
-            recognized, _ = db.recognize(rotated_case)
-            assert recognized["id"] == entry["id"]
-            solved = apply_moves(rotated_case, db.solve(rotated_case))
-            assert _cmll_solved(solved, target)
+        algorithm = tuple(entry["algorithm"].split())
+        for before in range(4):
+            for after in range(4):
+                sequence = _cmll_u_turn(before) + algorithm + _cmll_u_turn(after)
+                case = apply_moves(target, _cmll_inverse(sequence))
+                recognized, recognized_auf = db.recognize(case)
+                assert recognized["id"] == entry["id"]
+                assert recognized_auf == recognized["_pre_auf"]
+                solution = db.solve(case)
+                assert solution == recognized_auf + algorithm
+                solved = apply_moves(case, solution)
+                # The post-AUF is recognition-only: corners may finish in any
+                # of the four valid AUF states, without an alignment U move.
+                assert _cmll_solved(solved, target)
+
+
+def test_cmll_recognition_uses_auf_variants_without_cube_rotations() -> None:
+    target = CubeState.solved()
+    db = _CMLLDatabase(target)
+    rotations = {"x", "x2", "x'", "y", "y2", "y'", "z", "z2", "z'"}
+    for entry in db.entries:
+        base_algorithm = tuple(entry["algorithm"].split())
+        for before in range(4):
+            for after in range(4):
+                sequence = _cmll_u_turn(before) + base_algorithm + _cmll_u_turn(after)
+                case = apply_moves(target, _cmll_inverse(sequence))
+                recognized, _ = db.recognize(case)
+                assert recognized["id"] == entry["id"]
+                assert recognized["algorithm"] == entry["algorithm"]
+                assert recognized["_matched_algorithm"] == base_algorithm
+                solution = db.solve(case)
+                assert not any(move in rotations for move in solution)
+                assert _cmll_solved(apply_moves(case, solution), target)
 
 
 def assert_rotation_prefix_only(moves: tuple[str, ...]) -> None:

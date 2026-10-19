@@ -70,10 +70,12 @@ Sau khi chọn xong SB, bộ chuẩn hóa cục bộ có thể đổi move cuố
 
 ## 3. CMLL
 
-1. Nhận trạng thái đã giải FB và SB.
-2. Nhận diện và giải bốn góc tầng U bằng bảng thuật toán CMLL 42 trường hợp, có xử lý các biến thể AUF.
-3. Nếu không khớp trường hợp một-look trong bộ nhận diện, dùng quy trình CMLL hai-look hiện có.
-4. Một số thuật toán có `r`, nên sau khi áp dụng phải tính lại và lưu snapshot của cả 6 center. Xác minh hai block vẫn được giải và cả bốn góc CMLL đã đúng trước khi chuyển sang EO; không yêu cầu bốn center U/F/D/B giữ nguyên.
+1. Nhận trạng thái đã giải FB và SB; không thay đổi hoặc dựng lại lời giải SB trong phase CMLL.
+2. Nhận diện CMLL 1-look bằng bảng 42 thuật toán. Với mỗi thuật toán, database bao phủ đủ 4 AUF trước thuật toán và 4 AUF sau thuật toán, nhằm nhận diện các trạng thái góc tương ứng mà không cần xoay toàn khối bằng `y`, `y'` hoặc `y2`.
+3. AUF trước được chọn có thể cần thiết để đưa trạng thái vào đúng biến thể công thức; nếu có, lời giải CMLL gồm AUF trước đó rồi đến thuật toán CMLL. AUF sau chỉ dùng để mở rộng khả năng nhận diện trạng thái, **không được nối vào lời giải** để căn góc theo tâm.
+4. Điều kiện hoàn thành CMLL là bốn góc tầng U được định hướng đúng và có thứ tự tương đối đúng, cho phép bốn trạng thái tương đương AUF. Không thêm move `U` chỉ nhằm căn góc với tâm hoặc ép trạng thái về một AUF duy nhất. Nếu góc đã ở trạng thái CMLL hoàn chỉnh theo điều kiện này, trả về chuỗi move rỗng.
+5. Nếu không khớp trường hợp một-look trong bộ nhận diện, dùng quy trình CMLL hai-look hiện có.
+6. Một số thuật toán có `r`, nên sau khi áp dụng phải tính lại và lưu snapshot của cả 6 center. Xác minh hai block vẫn được giải và bốn góc CMLL đạt mục tiêu modulo AUF trước khi chuyển sang EO; không yêu cầu bốn center U/F/D/B giữ nguyên.
 
 ## 4. LSE: EO → ULUR → L4E
 

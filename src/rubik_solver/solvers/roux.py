@@ -179,61 +179,61 @@ def _cmll_inverse(moves: tuple[str, ...]) -> tuple[str, ...]:
 
 
 class _CMLLDatabase:
-    """Local 42-case CMLL algorithm database.
+    """Local CMLL database with AUF-equivalent recognition and execution.
 
-    Recognition is generated from the algorithms themselves: each algorithm's
-    inverse creates its canonical case, then all four U rotations are treated
-    as AUF-equivalent. This avoids hard-coding colour-dependent sticker
-    patterns and keeps recognition tied directly to the algorithm set.
+    The database does not generate y-conjugated algorithms. Each source
+    algorithm is inverted to create its corner case, and all four AUF states
+    before/after the algorithm are considered equivalent for recognition.
+    The trailing AUF is recognition-only: it must never be appended to the
+    executable solution merely to align corners with side centers.
     """
 
     def __init__(self, target: CubeState) -> None:
         with _CMLL_DB_PATH.open("r", encoding="utf-8") as handle:
             entries = json.load(handle)
         if len(entries) != 42:
-            raise RuntimeError(f"CMLL database must contain exactly 42 cases, got {len(entries)}")
+            raise RuntimeError(f"CMLL algorithm source must contain exactly 42 cases, got {len(entries)}")
         self.target = target
         self.entries = tuple(entries)
-        self._case_map: dict[tuple[int, ...], tuple[dict, tuple[int, ...]]] = {}
+        self._case_map: dict[tuple[int, ...], tuple[dict, tuple[str, ...]]] = {}
         for entry in self.entries:
-            alg = tuple(entry["algorithm"].split())
-            case = apply_moves(target, _cmll_inverse(alg))
-            case_signature = _cmll_corner_signature(case, target)
-            key = min(
-                _cmll_corner_signature(apply_moves(case, _cmll_u_turn(power)), target)
-                for power in range(4)
-            )
-            previous = self._case_map.get(key)
-            if previous is not None and previous[0]["id"] != entry["id"]:
-                raise RuntimeError(f"CMLL case collision: {previous[0]['id']} vs {entry['id']}")
-            self._case_map[key] = (entry, case_signature)
+            algorithm = tuple(entry["algorithm"].split())
+            for before in range(4):
+                for after in range(4):
+                    # Generate the exact inverse state for AUF-before + CMLL
+                    # algorithm + AUF-after. The trailing AUF participates in
+                    # recognition coverage only; solve() emits only the
+                    # pre-AUF and algorithm, leaving the final AUF untouched.
+                    sequence = _cmll_u_turn(before) + algorithm + _cmll_u_turn(after)
+                    case = apply_moves(target, _cmll_inverse(sequence))
+                    key = _cmll_corner_signature(case, target)
+                    previous = self._case_map.get(key)
+                    if previous is not None and previous[0]["id"] != entry["id"]:
+                        raise RuntimeError(f"CMLL AUF case collision: {previous[0]['id']} vs {entry['id']}")
+                    self._case_map[key] = (entry, _cmll_u_turn(before))
 
     def recognize(self, cube: CubeState) -> tuple[dict, tuple[str, ...]]:
-        for power in range(4):
-            auf = _cmll_u_turn(power)
-            rotated = apply_moves(cube, auf)
-            if _cmll_solved(rotated, self.target):
-                return {"id": "SOLVED", "family": "SOLVED", "name": "Already solved", "algorithm": ""}, auf
-            canonical = min(
-                _cmll_corner_signature(apply_moves(rotated, _cmll_u_turn(inner)), self.target)
-                for inner in range(4)
-            )
-            record = self._case_map.get(canonical)
-            if record is not None:
-                entry, case_signature = record
-                for extra in range(4):
-                    if _cmll_corner_signature(apply_moves(rotated, _cmll_u_turn(extra)), self.target) == case_signature:
-                        return entry, _cmll_u_turn(power + extra)
+        if _cmll_solved(cube, self.target):
+            return {"id": "SOLVED", "family": "SOLVED", "name": "Already solved", "algorithm": ""}, ()
+        record = self._case_map.get(_cmll_corner_signature(cube, self.target))
+        if record is not None:
+            entry, pre_auf = record
+            return {
+                **entry,
+                "_matched_algorithm": tuple(entry["algorithm"].split()),
+                "_pre_auf": pre_auf,
+            }, pre_auf
         raise RuntimeError("CMLL recognition failed: state is not one of the 42 CMLL corner cases")
 
     def solve(self, cube: CubeState) -> tuple[str, ...]:
         if _cmll_solved(cube, self.target):
             return ()
-        try:
-            entry, auf = self.recognize(cube)
-            return auf + tuple(entry["algorithm"].split())
-        except RuntimeError:
-            return _cmll_two_look(cube, self.target)
+        # Full CMLL recognition is mandatory in the main solve pipeline. A
+        # missing case is a broken invariant or recognizer defect, not a cue
+        # to silently switch methods and conceal the underlying problem.
+        entry, auf = self.recognize(cube)
+        algorithm = tuple(entry.get("_matched_algorithm", entry["algorithm"].split()))
+        return auf + algorithm
 
 
 def _sb_move_penalty(moves: tuple[str, ...]) -> int:
@@ -304,9 +304,14 @@ def _cmll_recognized(database: _CMLLDatabase, cube: CubeState) -> bool:
 
 
 def _cmll_solved(cube: CubeState, target: CubeState) -> bool:
-    return all(
-        cube.cp[pos] == target.cp[pos] and cube.co[pos] == target.co[pos]
-        for pos in _CMLL_CORNER_GOALS
+    # CMLL is complete when the four U corners match the target modulo AUF.
+    # Do not emit an extra U turn just to align the side stickers with centers.
+    return any(
+        all(
+            rotated.cp[pos] == target.cp[pos] and rotated.co[pos] == target.co[pos]
+            for pos in _CMLL_CORNER_GOALS
+        )
+        for rotated in (apply_moves(cube, _cmll_u_turn(power)) for power in range(4))
     )
 
 
@@ -2355,7 +2360,29 @@ class RouxSolver(Solver):
         # validated, continue with the existing CMLL and LSE solvers. These
         # later phases do not influence FB/SB candidate selection.
         cmll = _CMLLDatabase(candidate_reference)
-        cmll_moves = cmll.solve(verified_sb_after)
+        if not second_block_solved(verified_sb_after) or not _u_corners_on_u_layer(
+            verified_sb_after, candidate_reference
+        ):
+            raise RuntimeError(
+                "Roux CMLL precondition failed after validated SB: "
+                f"sb_corner_signature={_cmll_corner_signature(verified_sb_after, candidate_reference)}, "
+                f"cp={verified_sb_after.cp}, co={verified_sb_after.co}"
+            )
+        try:
+            cmll_case, _ = cmll.recognize(verified_sb_after)
+            cmll_moves = cmll.solve(verified_sb_after)
+            cmll_recognition_error = None
+        except RuntimeError as exc:
+            # Keep solving valid SB states while making the database gap
+            # observable. The database's solve() itself remains strict; this
+            # explicit pipeline branch is labelled in metadata and carries the
+            # exact signature/error for follow-up algorithm coverage work.
+            cmll_recognition_error = str(exc)
+            cmll_case = {
+                "id": "TWO_LOOK",
+                "family": "Explicit two-look coverage",
+            }
+            cmll_moves = _cmll_two_look(verified_sb_after, candidate_reference)
         cmll_after = apply_moves(verified_sb_after, cmll_moves)
         if (
             not _roux_blocks_and_cmll_solved(cmll_after, candidate_reference)
@@ -2511,14 +2538,9 @@ class RouxSolver(Solver):
                 "sb_pair_order": staged_sb.selected_pair_order,
                 "sb_pair_order_evaluations": tuple(staged_sb.pair_order_evaluations),
                 "sb_planner_score": staged_sb.planner_score,
-                "cmll_case": (
-                    cmll.recognize(verified_sb_after)[0]["id"]
-                    if _cmll_recognized(cmll, verified_sb_after) else "TWO_LOOK"
-                ),
-                "cmll_family": (
-                    cmll.recognize(verified_sb_after)[0]["family"]
-                    if _cmll_recognized(cmll, verified_sb_after) else "MU-compatible fallback"
-                ),
+                "cmll_case": cmll_case["id"],
+                "cmll_family": cmll_case["family"],
+                "cmll_recognition_error": cmll_recognition_error,
                 "eo_case": eo_case["id"],
                 "eo_family": eo_case["family"],
                 "ulur_case": ulur_case["id"],
