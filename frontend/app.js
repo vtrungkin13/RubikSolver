@@ -31,7 +31,7 @@ const translations = {
     sequenceTitle: "Chuỗi nước đi", sequenceDescription: "Đọc từ trái sang phải",
     copy: "Sao chép", copied: "Đã sao chép", copyFallback: "Chọn văn bản để sao chép",
     phasesTitle: "Các giai đoạn", phaseCount: n => `${n} giai đoạn`,
-    statMoves: "Tổng số nước đi", statMetric: "Thước đo", statMethod: "Phương pháp",
+    statMoves: "Tổng số nước đi", statMethod: "Phương pháp",
     noMoves: "Cube đã ở trạng thái được giải.", noPhaseMoves: "Không cần nước đi",
     moveCount: n => `${n} nước đi`, footer: "Giải từng bước. Hiểu từng nước đi.",
     switchLabel: "Switch language to English"
@@ -65,7 +65,7 @@ const translations = {
     sequenceTitle: "Move sequence", sequenceDescription: "Read from left to right",
     copy: "Copy", copied: "Copied", copyFallback: "Select text to copy",
     phasesTitle: "Solution phases", phaseCount: n => `${n} phases`,
-    statMoves: "Total moves", statMetric: "Metric", statMethod: "Method",
+    statMoves: "Total moves", statMethod: "Method",
     noMoves: "The cube is already solved.", noPhaseMoves: "No moves needed",
     moveCount: n => `${n} moves`, footer: "Solve step by step. Understand every move.",
     switchLabel: "Chuyển ngôn ngữ sang Tiếng Việt"
@@ -199,7 +199,6 @@ function renderPhases(phases = []) {
 function renderSolution(data) {
   $("#summary").replaceChildren(
     makeStat(data.move_count ?? 0, t("statMoves")),
-    makeStat(data.metric ?? "—", t("statMetric")),
     makeStat(data.method ?? methodSelect.value, t("statMethod"))
   );
   const sequence = $("#solution");
