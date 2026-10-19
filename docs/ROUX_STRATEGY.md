@@ -12,7 +12,7 @@ Solver chạy đủ sáu phase và kiểm tra trạng thái sau từng phase. Kh
 
 - FB và SB là hai ranh giới độc lập. Chọn FB chỉ dựa trên chất lượng FB; không dùng SB, CMLL hoặc LSE để chấm điểm hay chọn lại FB.
 - Mỗi phase nhận đúng trạng thái thu được bằng cách áp dụng các move của phase trước. Không tạo trạng thái giả hoặc chuẩn hóa tâm trước khi chuyển phase.
-- Vị trí tâm được giữ trong trạng thái và metadata để quan sát. Không bắt buộc khôi phục tâm như một mục tiêu riêng nếu bất biến cubie/frame của phase không yêu cầu.
+- Toàn bộ 6 center luôn được giữ trong `CubeState` và snapshot metadata sau từng phase. Center chỉ là điều kiện goal khi được nêu rõ; không ép các center U/F/D/B trở về vị trí trước phase. Trong frame Roux đang dùng, L/R là hai center cố định với các tập move của SB/CMLL/LSE; bốn center còn lại được theo dõi theo đúng chuỗi move thực tế.
 - Mỗi phase phải kiểm tra điều kiện đích trước khi tiếp tục. Lỗi phải chỉ ra phase thất bại; không âm thầm chuyển sang phương pháp giải khác.
 - Giới hạn độ sâu, số node và thời gian là giới hạn tài nguyên; chúng không thay thế bước xác minh trạng thái.
 
@@ -22,7 +22,7 @@ Solver chạy đủ sáu phase và kiểm tra trạng thái sau từng phase. Kh
 2. Với mỗi frame, chạy bộ dựng FB theo kiểu nhận diện cơ hội trước, sau đó chạy tìm kiếm chính xác có giới hạn để tìm cách cải thiện lời giải dựng được.
 3. Bộ dựng theo giai đoạn tận dụng cấu trúc đang có: quan hệ cạnh–tâm, cặp góc–cạnh đã ghép, hình vuông (1×2×2), và đường (1×1×3). Trình tự ưu tiên là tạo/giữ đường (1×1×3) khi khả thi, tạo hình vuông (1×2×2), rồi hoàn tất cặp góc–cạnh còn lại. Nếu nhánh giữ đường không phù hợp, có thể xét cách dựng không giữ đường.
 4. Chỉ đưa các ứng viên FB hợp lệ vào danh sách. Thứ tự xếp hạng hiện tại ưu tiên: giữ các góc U trên tầng U, điểm nhận diện mẫu của frame, ứng viên từ bộ dựng theo giai đoạn khi các tiêu chí trước ngang nhau, độ thuận tay của chuỗi move, số move và chỉ số frame. Không dùng SB hay các phase sau trong điểm số.
-5. Nếu cần đổi hướng toàn khối để thiết lập frame, đưa phép xoay vào đầu lời giải; không xoay trả lại sau khi giải xong. Áp dụng chuỗi FB lên trạng thái đầu vào thực và xác minh mục tiêu FB theo cubie.
+5. Nếu cần đổi hướng toàn khối để thiết lập frame, đưa phép xoay vào đầu lời giải; không xoay trả lại sau khi giải xong. Goal FB gồm các cubie của block và center L đúng màu theo frame. Không yêu cầu F/D/B/U/R khớp frame ở ranh giới FB; phải lưu snapshot đầy đủ của cả 6 center.
 
 Tìm kiếm FB có giới hạn, không đảm bảo lời giải FB ngắn nhất toàn cục. Tham số độ sâu/node/thời gian chỉ giới hạn tài nguyên.
 
@@ -64,41 +64,41 @@ Sau khi chọn xong SB, bộ chuẩn hóa cục bộ có thể đổi move cuố
 
 ### 2.5. Điều kiện xác minh SB
 
-- SB phải đạt đúng mục tiêu cubie trong frame đã chọn.
+- SB phải đạt đúng mục tiêu cubie trong frame đã chọn. Center R và L giữ nguyên; bốn center U/F/D/B có thể thay đổi theo các move `M/r` và phải được ghi lại chính xác.
 - FB phải tiếp tục được giải sau khi áp dụng SB.
-- Kiểm tra trên trạng thái thực sau khi áp dụng toàn bộ chuỗi move, không chỉ dựa vào kết quả tìm kiếm trung gian.
+- Kiểm tra trên trạng thái thực sau khi áp dụng toàn bộ chuỗi move, không chỉ dựa vào kết quả tìm kiếm trung gian. Không yêu cầu toàn bộ center permutation sau SB bằng trạng thái sau FB.
 
 ## 3. CMLL
 
 1. Nhận trạng thái đã giải FB và SB.
 2. Nhận diện và giải bốn góc tầng U bằng bảng thuật toán CMLL 42 trường hợp, có xử lý các biến thể AUF.
 3. Nếu không khớp trường hợp một-look trong bộ nhận diện, dùng quy trình CMLL hai-look hiện có.
-4. Xác minh hai block vẫn được giải và cả bốn góc CMLL đã đúng trước khi chuyển sang EO.
+4. Một số thuật toán có `r`, nên sau khi áp dụng phải tính lại và lưu snapshot của cả 6 center. Xác minh hai block vẫn được giải và cả bốn góc CMLL đã đúng trước khi chuyển sang EO; không yêu cầu bốn center U/F/D/B giữ nguyên.
 
 ## 4. LSE: EO → ULUR → L4E
 
 ### 4.1. EO — định hướng cạnh
 
 - Dùng bộ nhận diện công thức EO của LSE trên trạng thái sau CMLL.
-- Áp dụng công thức được chọn và xác minh mục tiêu EO trước khi tiếp tục.
-- Trạng thái tâm được giữ theo đúng chuỗi move thực tế; không thêm move chỉ để làm các tâm trông như đã trở lại vị trí ban đầu.
+- Áp dụng công thức được chọn và xác minh mục tiêu EO trước khi tiếp tục. Ghi lại toàn bộ center permutation sau EO; không yêu cầu U/F/D/B giữ nguyên.
+- Không thêm move chỉ để làm các tâm trông như đã trở lại vị trí ban đầu.
 
 ### 4.2. ULUR
 
 - Dùng bộ tìm kiếm IDA* riêng trên tập move `M/U`.
-- Ghi lại chuỗi move và số node đã duyệt trong metadata.
-- Xác minh mục tiêu UL/UR trước khi chuyển sang L4E.
+- Ghi lại chuỗi move, số node đã duyệt và snapshot đầy đủ của center sau ULUR.
+- Xác minh mục tiêu UL/UR trước khi chuyển sang L4E; không yêu cầu toàn bộ center permutation giữ nguyên sau ULUR.
 
 ### 4.3. L4E
 
 - Ưu tiên bộ nhận diện công thức L4E hiện có.
 - Nếu bảng công thức không có trường hợp phù hợp với trạng thái hợp lệ, dùng tìm kiếm trạng thái chính xác cục bộ L4E trên tập `M/U`.
 - Nhánh này chỉ hoàn tất L4E trong LSE; không phải fallback của SB và không thay thế toàn bộ Roux bằng Kociemba.
-- Xác minh cubie cuối cùng đã giải trong frame đang dùng.
+- Xác minh cubie cuối cùng đã giải trong frame đang dùng và ghi lại trạng thái center thực tế sau L4E. Các center U/F/D/B không bị ép về permutation ban đầu nếu thuật toán đã giải đúng mục tiêu cubie; L/R phải giữ nguyên theo quy ước move/frame.
 
 ## 5. Trạng thái phase, metadata và lỗi
 
-Lưu snapshot tại các mốc `fb_state`, `sb_state`, `cmll_state`, `eo_state`, `ulur_state`, `l4e_state`; giữ cả quan sát tâm khi có. Mỗi phase chỉ được chấp nhận sau khi áp dụng move lên trạng thái trước đó và kiểm tra bất biến của phase.
+Lưu snapshot đầy đủ `cp`, `co`, `ep`, `eo`, `center` tại các mốc `fb_state`, `sb_state`, `cmll_state`, `eo_state`, `ulur_state`, `l4e_state`. Mỗi snapshot phải được tính bằng cách áp dụng đúng chuỗi move lên trạng thái đầu vào của phase, không tái dựng hoặc chuẩn hóa center khi bàn giao.
 
 Thành công cuối cùng đòi hỏi cubie được giải trong frame hoạt động. Nếu một phase lỗi, phải giữ thông tin đủ để xác định chính xác phase đó; không trả kết quả thành công chỉ vì một solver khác có thể giải được cube.
 

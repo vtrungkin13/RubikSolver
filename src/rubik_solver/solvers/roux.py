@@ -25,9 +25,8 @@ _ROUX_EXTRA_MOVES = ("r", "r2", "r'", "M", "M2", "M'")
 # too, and treat all of these as normal construction moves (not rotations).
 _ROUX_WIDE_MOVES = ("u", "u2", "u'")
 _ROUX_MOVES = _ALL_MOVES + _ROUX_EXTRA_MOVES + _ROUX_WIDE_MOVES
-# FB construction tracks centers because CubeState carries their permutation,
-# but FB completion is cubie-based: Roux may use r/M/u without requiring the
-# final centers to match the active setup frame.
+# FB completion requires the left-block cubies and matching L center only.
+# All other center positions are tracked in the resulting CubeState, not goals.
 _FB_MOVES = _ROUX_MOVES
 _SB_MOVES = (
     "U", "U2", "U'",
@@ -49,13 +48,12 @@ _SB_MOVE_PENALTY = {
     **{move: 6 for move in ("B", "B2", "B'", "D", "D2", "D'")},
 }
 
-# A Roux FB is a 1x2x3 block on the LEFT. Its bottom must be made from the
-# white stickers. The FB's four adjacent centers (D/F/L/B) must match the
-# colors of its corners/edges; U/R centers may be permuted without invalidating
-# the block. Center tuple order is U, R, F, D, L, B.
+# A Roux FB is a 1x2x3 block on the LEFT. Only its L center is a center goal;
+# the other five center positions are tracked but do not gate FB completion.
+# Center tuple order is U, R, F, D, L, B.
 _FB_CORNER_GOALS = (5, 6)  # DLF, DBL
 _FB_EDGE_GOALS = (6, 9, 10)  # DL, FL, BL
-_FB_CENTER_COLOR_POSITIONS = (2, 3, 4, 5)  # F, D, L, B
+_FB_CENTER_COLOR_POSITIONS = (4,)  # L only
 _SB_CORNER_GOALS = (4, 7)  # DFR, DBR
 _SB_EDGE_GOALS = (4, 8, 11)  # DR, FR, BR
 # Canonical cubie sticker order, in face indices U, R, F, D, L, B.
@@ -87,12 +85,7 @@ def _fb_cubies_goal(cube: CubeState, reference: CubeState) -> bool:
 
 
 def _fb_goal(cube: CubeState, reference: CubeState) -> bool:
-    """Return whether FB cubies and their four adjacent center colors agree.
-
-    The two FB corners and three FB edges must be solved, and the centers on
-    D/F/L/B must carry the matching colors. The other two centers (U/R) need
-    not retain their setup-frame permutation.
-    """
+    """Return whether FB cubies are solved and the L center matches the block."""
     return _fb_cubies_goal(cube, reference) and all(
         cube.center[pos] == reference.center[pos]
         for pos in _FB_CENTER_COLOR_POSITIONS
@@ -100,15 +93,15 @@ def _fb_goal(cube: CubeState, reference: CubeState) -> bool:
 
 
 def _fb_search_goal(cube: CubeState, reference: CubeState) -> bool:
-    """FB construction stops when its cubies are solved; centers are observed, not repaired."""
-    return _fb_cubies_goal(cube, reference)
+    """Require the FB cubies and L center only; track all centers separately."""
+    return _fb_goal(cube, reference)
 
 
 def _fb_centers_match_frame(moves: tuple[str, ...], frame: tuple[str, ...]) -> bool:
-    """Return whether the physical FB sequence ends in the active frame."""
+    """Return whether the physical FB sequence leaves the L center in-frame."""
     actual = apply_moves(CubeState.solved(), moves)
     expected = apply_moves(CubeState.solved(), frame)
-    return actual.center == expected.center
+    return actual.center[4] == expected.center[4]
 
 
 def first_block_solved(cube: CubeState, frame_index: int | None = None) -> bool:
@@ -123,6 +116,8 @@ def first_block_solved(cube: CubeState, frame_index: int | None = None) -> bool:
     solved = CubeState.solved()
     if frame_index is not None:
         reference = apply_moves(solved, _fb_frame(frame_index))
+        # This predicate is also used after later Roux phases, whose slice
+        # moves may permute modeled centers while preserving the FB cubies.
         return _fb_cubies_goal(cube, reference)
     for frame_index in range(4):
         frame = _fb_frame(frame_index)
@@ -411,7 +406,7 @@ def _lse_key(cube: CubeState, target: CubeState) -> tuple[int, ...]:
 
 
 def _solve_eo_intuitive(cube: CubeState, target: CubeState) -> tuple[str, ...]:
-    """Exact MU-only EO search on the six Roux last-layer edges."""
+    """Solve EO with M/U while retaining the actual center state after moves."""
     moves = (("M",), ("M2",), ("M'",), ("U",), ("U2",), ("U'",))
 
     def goal(state: CubeState) -> bool:
@@ -459,13 +454,16 @@ def _solve_lse_subphase(
     raise RuntimeError("Roux LSE MU-only search failed")
 
 
-def _solve_l4e_mu(cube: CubeState, target: CubeState) -> tuple[str, ...]:
+def _solve_l4e_mu(
+    cube: CubeState,
+    target: CubeState,
+) -> tuple[str, ...]:
     """Exact M/U completion for a legal L4E state not covered by the formula table.
 
     The published Roux Method VN recognizer remains the primary path. This
     finite-state fallback is local to L4E (never an SB/direct-cube fallback)
-    and uses the tracked edge/corner projection. Center permutation is retained
-    in the observed state but is not an L4E goal in the Roux move model.
+    and uses the tracked edge/corner projection. Center permutations are
+    retained in the state but do not constrain the L4E cubie goal.
     """
     moves = ("M", "M2", "M'", "U", "U2", "U'")
 
@@ -713,13 +711,16 @@ class _LSEFormulaDatabase:
     def _moves(entry: dict) -> tuple[str, ...]:
         return tuple(entry["algorithm"].split())
 
-    def _try_phase(self, cube, target, entries, goal, auf_powers=(0, 1, 2, 3)):
+    def _try_phase(
+        self, cube, target, entries, goal, auf_powers=(0, 1, 2, 3),
+    ):
         for power in auf_powers:
             auf = _lse_u_turn(power)
             rotated = apply_moves(cube, auf)
             for entry in entries:
                 moves = self._moves(entry)
-                if goal(apply_moves(rotated, moves), target):
+                result = apply_moves(rotated, moves)
+                if goal(result, target):
                     return entry, auf + moves
         return None
 
@@ -738,7 +739,9 @@ class _LSEFormulaDatabase:
             return {"id": "SOLVED", "family": "SOLVED", "algorithm": ""}, ()
         return self._try_phase(cube, target, self.ulur, centered_goal)
 
-    def solve_l4e(self, cube: CubeState, target: CubeState):
+    def solve_l4e(
+        self, cube: CubeState, target: CubeState,
+    ):
         centered_goal = lambda state, goal_target: _l4e_solved(state, goal_target)
         if centered_goal(cube, target):
             return {"id": "SOLVED", "family": "SOLVED", "algorithm": ""}, ()
@@ -1057,6 +1060,7 @@ class _StagedSBSearch:
     """Recognition-first SB planner: DR pair -> square -> remaining pair."""
 
     target: CubeState
+    expected_centers: tuple[int, ...] | None = field(init=False, default=None)
     # None means iterative deepening continues until a strategy finds a goal;
     # node/time budgets remain independent safety controls.
     max_depth: int | None = None
@@ -1088,7 +1092,10 @@ class _StagedSBSearch:
         ) and all(
             cube.ep[pos] == self.target.ep[pos] and cube.eo[pos] == self.target.eo[pos]
             for pos in _SB_EDGE_GOALS
-        ) and _u_corners_on_u_layer(cube, self.target)
+        ) and _u_corners_on_u_layer(cube, self.target) and (
+            self.expected_centers is None
+            or (cube.center[1] == self.expected_centers[1] and cube.center[4] == self.expected_centers[4])
+        )
 
     def _heuristic(self, cube: CubeState, goals: tuple[tuple[int, int], ...]) -> int:
         return max(
@@ -1113,6 +1120,7 @@ class _StagedSBSearch:
         preserve_goals: tuple[tuple[int, int], ...] = (),
         preserve_pairs: tuple[tuple[int, int], ...] = (),
         max_stage_depth: int | None,
+        center_target: tuple[int, ...] | None = None,
     ) -> tuple[str, ...]:
         def goal(state: CubeState) -> bool:
             if not all(
@@ -1134,17 +1142,26 @@ class _StagedSBSearch:
                 for corner, edge in preserve_goals
             ):
                 return False
-            return all(
+            cubies_solved = all(
                 state.ep[edge] == self.target.ep[edge]
                 and state.eo[edge] == self.target.eo[edge]
                 for edge in include_edges
             )
+            return cubies_solved and (
+                center_target is None
+                or (state.center[1] == center_target[1] and state.center[4] == center_target[4])
+            )
 
         if goal(cube):
             return ()
-        threshold = self._heuristic(cube, goals)
+        threshold = max(
+            self._heuristic(cube, goals),
+            int(center_target is not None and (cube.center[1] != center_target[1] or cube.center[4] != center_target[4])),
+        )
         while max_stage_depth is None or threshold <= max_stage_depth:
-            result = self._dfs(cube, 0, threshold, None, goal, goals, preserve_pairs)
+            result = self._dfs(
+                cube, 0, threshold, None, goal, goals, preserve_pairs, center_target
+            )
             if result is not None:
                 return result
             threshold += 1
@@ -1274,13 +1291,20 @@ class _StagedSBSearch:
             })
         return evaluated
 
-    def _dfs(self, cube, depth, threshold, previous_face, goal, goals, preserve_pairs=()):
+    def _dfs(
+        self, cube, depth, threshold, previous_face, goal, goals,
+        preserve_pairs=(), center_target: tuple[int, ...] | None = None,
+    ):
         self.nodes += 1
         self._check_limits()
         if not all(_sb_pair_joined(cube, self.target, corner_piece, edge_piece)
                    for corner_piece, edge_piece in preserve_pairs):
             return None
-        if depth + self._heuristic(cube, goals) > threshold:
+        heuristic = max(
+            self._heuristic(cube, goals),
+            int(center_target is not None and (cube.center[1] != center_target[1] or cube.center[4] != center_target[4])),
+        )
+        if depth + heuristic > threshold:
             return None
         if goal(cube):
             return tuple(self.path)
@@ -1295,7 +1319,8 @@ class _StagedSBSearch:
                 continue
             self.path.append(move)
             result = self._dfs(
-                apply_move(cube, move), depth + 1, threshold, face, goal, goals, preserve_pairs
+                apply_move(cube, move), depth + 1, threshold, face, goal, goals,
+                preserve_pairs, center_target,
             )
             self.path.pop()
             if result is not None:
@@ -1379,12 +1404,15 @@ class _StagedSBSearch:
         return results
 
     def solve(self, cube: CubeState) -> tuple[str, ...]:
+        self.expected_centers = cube.center
         # This planner is called with a fixed FB frame. Do not use the
         # frame-agnostic second_block_solved() predicate here: accepting a
         # different y-frame can produce a deceptively short candidate that
         # the fixed-target exact search cannot reproduce.
         if (
-            all(
+            cube.center[1] == self.expected_centers[1]
+            and cube.center[4] == self.expected_centers[4]
+            and all(
                 cube.cp[pos] == self.target.cp[pos] and cube.co[pos] == self.target.co[pos]
                 for pos in _SB_CORNER_GOALS
             )
@@ -1471,6 +1499,7 @@ class _StagedSBSearch:
                         (final_pair,),
                         include_edges=(4, 8, 11),
                         preserve_goals=(plan["first_pair"],),
+                        center_target=self.expected_centers,
                         max_stage_depth=remaining,
                     )
                 ]
@@ -1554,6 +1583,7 @@ class _StagedSBSearch:
                     (final_pair,),
                     include_edges=(4, 8, 11),
                     preserve_pairs=square_identity_pairs,
+                    center_target=self.expected_centers,
                     max_stage_depth=None,
                 )
             except (RuntimeError, TimeoutError):
@@ -1599,7 +1629,9 @@ class _StagedSBSearch:
                 try:
                     final_moves = self._solve_stage(
                         after_square, (final_pair,), include_edges=(4, 8, 11),
-                        preserve_pairs=square_identity_pairs, max_stage_depth=None,
+                        preserve_pairs=square_identity_pairs,
+                        center_target=self.expected_centers,
+                        max_stage_depth=None,
                     )
                 except (RuntimeError, TimeoutError):
                     final_moves = ()
@@ -1645,6 +1677,9 @@ class _StagedSBSearch:
                                 preserve_goals=(dr_pair,),
                                 preserve_pairs=tuple(pair for pair in remaining_pairs
                                                      if pair != (corner_piece, edge_piece)),
+                                center_target=(
+                                    self.expected_centers if len(remaining_pairs) == 1 else None
+                                ),
                                 max_stage_depth=None,
                             )
                         except (RuntimeError, TimeoutError):
@@ -1698,7 +1733,13 @@ def _optimize_sb_final_move_for_eo(
         "replacement_move": None,
         "centers_ready_for_eo": _centers_ready_for_eo_state(current_state) if moves else _centers_ready_for_eo_state(cube),
     }
-    if not moves or metadata["centers_ready_for_eo"]:
+    if not moves:
+        return moves, metadata
+    centers_preserved = (
+        current_state.center[1] == cube.center[1]
+        and current_state.center[4] == cube.center[4]
+    )
+    if centers_preserved and metadata["centers_ready_for_eo"]:
         return moves, metadata
     replacement = {"R": "r", "R'": "r'"}.get(moves[-1])
     if replacement is None:
@@ -1716,6 +1757,8 @@ def _optimize_sb_final_move_for_eo(
         )
         and _u_corners_on_u_layer(candidate_state, target)
     ):
+        return moves, metadata
+    if (candidate_state.center[1], candidate_state.center[4]) != (cube.center[1], cube.center[4]):
         return moves, metadata
     metadata.update({"applied": True, "replacement_move": replacement})
     return candidate, metadata
@@ -2020,11 +2063,14 @@ def _staged_fb_candidate(
                 side_ctr = "Ctr-FL" if first_corner == 5 else "Ctr-BL"
                 if kind == "line" and side_ctr in patterns:
                     preserve_edges = tuple(sorted(set(preserve_edges + (side_edge,))))
+                # Earlier stages may temporarily move centers, but the final
+                # FB stage must restore the L center that anchors the block.
+                preserve_centers = _FB_CENTER_COLOR_POSITIONS if kind == "final" else ()
                 try:
                     stage_moves = search.solve(
                         state, kind, first_corner, first_edge,
                         preserve_edges=preserve_edges,
-                        preserve_centers=(),
+                        preserve_centers=preserve_centers,
                     )
                 except (RuntimeError, TimeoutError):
                     failed = True
@@ -2084,6 +2130,7 @@ class _FirstBlockSearch:
             _f2l_pair_heuristic(cube, self.target.cp[5], self.target.ep[6], 5, 6, self.target.co[5], self.target.eo[6]),
             _f2l_pair_heuristic(cube, self.target.cp[6], self.target.ep[9], 6, 9, self.target.co[6], self.target.eo[9]),
             _f2l_pair_heuristic(cube, self.target.cp[5], self.target.ep[10], 5, 10, self.target.co[5], self.target.eo[10]),
+            int(any(cube.center[pos] != self.target.center[pos] for pos in _FB_CENTER_COLOR_POSITIONS)),
         )
 
     def solve(self, cube: CubeState) -> tuple[str, ...]:
@@ -2237,8 +2284,8 @@ class RouxSolver(Solver):
         # Human-style phase boundary: FB is optimized in isolation. Do not
         # inspect or score SB while selecting the FB. Once the shortest valid
         # FB is chosen, SB starts from exactly that resulting state.
-        # Centers are not an FB validity or ranking condition. Their state is
-        # captured at the boundary and carried as metadata only.
+        # Rank only valid FB candidates. Preserve the actual center state at
+        # the boundary; do not normalize or synthesize it for downstream phases.
         selected_fb = min(
             candidates,
             key=lambda item: (
@@ -2292,6 +2339,8 @@ class RouxSolver(Solver):
         candidate_sb_after = apply_moves(candidate_after, candidate_sb_moves)
         if not second_block_solved(candidate_sb_after):
             raise RuntimeError("Roux Second Block planner produced an invalid SB candidate")
+        if (candidate_sb_after.center[1], candidate_sb_after.center[4]) != (candidate_after.center[1], candidate_after.center[4]):
+            raise RuntimeError("Roux Second Block changed the fixed R/L centers")
 
         fb_after = apply_moves(cube, candidate_fb)
         if not first_block_solved(fb_after, candidate_frame):
@@ -2308,14 +2357,21 @@ class RouxSolver(Solver):
         cmll = _CMLLDatabase(candidate_reference)
         cmll_moves = cmll.solve(verified_sb_after)
         cmll_after = apply_moves(verified_sb_after, cmll_moves)
-        if not _roux_blocks_and_cmll_solved(cmll_after, candidate_reference):
-            raise RuntimeError("Roux CMLL failed phase-state verification")
+        if (
+            not _roux_blocks_and_cmll_solved(cmll_after, candidate_reference)
+            or (cmll_after.center[1], cmll_after.center[4]) != (verified_sb_after.center[1], verified_sb_after.center[4])
+        ):
+            raise RuntimeError("Roux CMLL failed corner or fixed R/L center verification")
 
         lse = _LSEFormulaDatabase()
         eo_case, eo_moves = lse.solve_eo(cmll_after, candidate_reference)
         eo_after = apply_moves(cmll_after, eo_moves)
-        if not _eo_solved(eo_after, candidate_reference):
-            raise RuntimeError("Roux EO failed phase-state verification")
+        if (
+            not _roux_blocks_and_cmll_solved(eo_after, candidate_reference)
+            or not _eo_solved(eo_after, candidate_reference)
+            or (eo_after.center[1], eo_after.center[4]) != (cmll_after.center[1], cmll_after.center[4])
+        ):
+            raise RuntimeError("Roux EO failed block/CMLL preservation, edge orientation, or fixed R/L center verification")
 
         ulur_search = _ULURIDAStar(target=candidate_reference, l4e_database=lse)
         ulur_moves = ulur_search.solve(eo_after)
@@ -2326,8 +2382,8 @@ class RouxSolver(Solver):
             "nodes": ulur_search.nodes,
         }
         ulur_after = apply_moves(eo_after, ulur_moves)
-        if not _ulur_solved(ulur_after, candidate_reference):
-            raise RuntimeError("Roux ULUR failed phase-state verification")
+        if not _ulur_solved(ulur_after, candidate_reference) or (ulur_after.center[1], ulur_after.center[4]) != (eo_after.center[1], eo_after.center[4]):
+            raise RuntimeError("Roux ULUR failed UL/UR or fixed R/L center verification")
 
         l4e_formula = lse.solve_l4e(ulur_after, candidate_reference)
         if l4e_formula is None:
@@ -2344,16 +2400,15 @@ class RouxSolver(Solver):
         else:
             l4e_case, l4e_moves = l4e_formula
         l4e_after = apply_moves(ulur_after, l4e_moves)
-        if not _l4e_solved(l4e_after, candidate_reference):
-            raise RuntimeError("Roux L4E failed phase-state verification")
+        if not _l4e_solved(l4e_after, candidate_reference) or (l4e_after.center[1], l4e_after.center[4]) != (candidate_after.center[1], candidate_after.center[4]):
+            raise RuntimeError("Roux L4E failed cubie or fixed R/L center verification")
         if (l4e_after.cp, l4e_after.co, l4e_after.ep, l4e_after.eo) != (
             candidate_reference.cp, candidate_reference.co,
             candidate_reference.ep, candidate_reference.eo,
         ):
             raise RuntimeError("Roux LSE completed but cubies do not match the active frame")
-        # Center permutation is preserved as observational metadata. The
-        # Roux solve goal is all cubies solved in the active frame; M/r moves
-        # may leave the tracked center frame permuted without invalidating it.
+        # M/r moves may permute the four middle-layer centers. The R/L centers
+        # remain fixed, while each full center permutation is recorded below.
 
         all_moves = (
             tuple(candidate_fb) + candidate_sb_moves + tuple(cmll_moves)
@@ -2406,6 +2461,7 @@ class RouxSolver(Solver):
             metadata={
                 "status": "l4e",
                 "verification_scope": "first_block+second_block+cmll+eo+ulur+l4e",
+                "center_verification": "exact-phase-snapshots; FB-L; later-phases-preserve-RL",
                 "search": "recognition-first staged FB/SB followed by existing CMLL and LSE solvers; no direct SB fallback",
                 "fb_nodes": candidate_search if isinstance(candidate_search, int) else candidate_search.nodes,
                 "sb_nodes": staged_sb.nodes,

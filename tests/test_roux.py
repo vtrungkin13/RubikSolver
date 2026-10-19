@@ -82,11 +82,24 @@ def test_fb_move_style_prefers_wide_u_to_d_turns() -> None:
     assert _fb_move_style_score(("x2", "R2")) < _fb_move_style_score(("x2", "L2"))
 
 
-def test_fb_search_goal_does_not_repair_or_require_center_permutation() -> None:
+def test_fb_search_goal_requires_l_center_only_and_tracks_other_centers() -> None:
+    from dataclasses import replace
+
     target = apply_moves(CubeState.solved(), _fb_frame(0))
     centers_shifted = apply_moves(target, ("M",))
+    # M permutes U/F/D/B in the model but leaves L/R centers fixed. FB only
+    # requires L to match the block; the other center positions are observed.
     assert _fb_search_goal(centers_shifted, target)
-    assert not _fb_goal(centers_shifted, target)
+    assert _fb_goal(centers_shifted, target)
+
+    # Any non-L center permutation is allowed at the FB goal boundary.
+    non_fb_centers_permuted = list(target.center)
+    non_fb_centers_permuted[0], non_fb_centers_permuted[1] = (
+        non_fb_centers_permuted[1], non_fb_centers_permuted[0]
+    )
+    state = replace(target, center=tuple(non_fb_centers_permuted))
+    assert _fb_search_goal(state, target)
+    assert _fb_goal(state, target)
 
 
 def test_fb_stages_start_with_ctr_dl_when_no_reusable_block_exists() -> None:
@@ -198,6 +211,21 @@ def test_regression_scramble_fb_uses_exact_active_frame() -> None:
     assert result.metadata["fb_construction_moves"] == fb_moves[len(frame):]
     assert result.metadata["fb_execution_order"] == "setup_rotation_then_construction"
     assert first_block_solved(fb_after, result.metadata["frame"])
+
+    reference = apply_moves(CubeState.solved(), frame)
+    assert fb_after.center[4] == reference.center[4]
+    state = fb_after
+    phase_centers = [state.center]
+    for phase in result.phases[1:]:
+        state = apply_moves(state, phase.moves)
+        phase_centers.append(state.center)
+    # R/L centers stay fixed across Roux phases; middle-layer centers are
+    # allowed to permute and every full permutation is recorded in metadata.
+    assert phase_centers[0][4] == reference.center[4]
+    for before, after in zip(phase_centers[:-1], phase_centers[1:]):
+        assert (after[1], after[4]) == (before[1], before[4])
+    for phase_key, centers in zip(("fb", "sb", "cmll", "eo", "ulur", "l4e"), phase_centers):
+        assert centers == result.metadata[f"{phase_key}_state"]["center"]
 
 
 def test_roux_phase_boundary_hard_sb_case_does_not_reopen_fb() -> None:
@@ -469,19 +497,31 @@ def test_roux_phase_boundaries_are_verified_end_to_end() -> None:
         phase_states[phase.name] = state
 
     # Phase-boundary states are the literal results of applying each phase;
-    # center permutation is observed, not rewritten to the reference frame.
+    # center permutation is checked at every handoff, not normalized after EO.
     assert _fb_cubies_goal(phase_states["First Block"], reference)
     assert phase_states["First Block"].center == result.metadata["fb_center_state"]
+    assert phase_states["First Block"].center[4] == reference.center[4]
     assert second_block_solved(phase_states["Second Block"])
+    assert _centers_ready_for_eo_state(phase_states["Second Block"])
     assert phase_states["Second Block"].cp == result.metadata["sb_state"]["cp"]
     assert phase_states["Second Block"].ep == result.metadata["sb_state"]["ep"]
     assert _cmll_solved(phase_states["CMLL"], reference)
+    assert (phase_states["CMLL"].center[1], phase_states["CMLL"].center[4]) == (phase_states["Second Block"].center[1], phase_states["Second Block"].center[4])
     assert _eo_solved(phase_states["EO"], reference)
+    assert (phase_states["EO"].center[1], phase_states["EO"].center[4]) == (phase_states["CMLL"].center[1], phase_states["CMLL"].center[4])
     assert _ulur_solved(phase_states["ULUR"], reference)
+    assert (phase_states["ULUR"].center[1], phase_states["ULUR"].center[4]) == (phase_states["EO"].center[1], phase_states["EO"].center[4])
     assert _l4e_solved(phase_states["L4E"], reference)
-    for phase_name in ("CMLL", "EO", "ULUR", "L4E"):
-        assert phase_states[phase_name].cp == result.metadata[f"{phase_name.lower()}_state"]["cp"]
-        assert phase_states[phase_name].ep == result.metadata[f"{phase_name.lower()}_state"]["ep"]
+    assert (phase_states["L4E"].center[1], phase_states["L4E"].center[4]) == (phase_states["Second Block"].center[1], phase_states["Second Block"].center[4])
+    phase_keys = {"First Block": "fb", "Second Block": "sb", "CMLL": "cmll", "EO": "eo", "ULUR": "ulur", "L4E": "l4e"}
+    for phase_name, phase_key in phase_keys.items():
+        state = phase_states[phase_name]
+        recorded = result.metadata[f"{phase_key}_state"]
+        assert state.cp == recorded["cp"]
+        assert state.co == recorded["co"]
+        assert state.ep == recorded["ep"]
+        assert state.eo == recorded["eo"]
+        assert state.center == recorded["center"]
 
 
 def test_fb_allows_non_fb_centers_to_permute_but_preserves_fb_center_colors() -> None:
@@ -495,9 +535,10 @@ def test_fb_allows_non_fb_centers_to_permute_but_preserves_fb_center_colors() ->
     after_fb = apply_moves(cube, old_fb)
 
     assert _fb_cubies_goal(after_fb, reference)
+    # This candidate has the wrong L center, so it is not a valid FB goal.
     assert not _fb_goal(after_fb, reference)
 
-    # Permuting only U/R centers is permitted when D/F/L/B still match the FB.
+    # Permuting any centers except L is permitted at the FB boundary.
     swapped_non_fb_centers = list(reference.center)
     swapped_non_fb_centers[0], swapped_non_fb_centers[1] = (
         swapped_non_fb_centers[1], swapped_non_fb_centers[0]
@@ -509,15 +550,21 @@ def test_fb_allows_non_fb_centers_to_permute_but_preserves_fb_center_colors() ->
     assert _fb_goal(apply_moves(cube, center_valid_control), reference)
 
 
-def test_user_fb_sequence_is_rejected_if_fb_center_colors_do_not_match() -> None:
+def test_user_fb_sequence_only_fails_when_l_center_mismatches() -> None:
+    from dataclasses import replace
+
     cube = scrambled("B2 D2 L2 D' F' U D B2 R' B' D2 F U2 D2 F U2 B' R2 F R2")
     user_fb = ("x2", "y'", "F'", "U", "B'", "u2", "M2", "B'")
     after_fb = apply_moves(cube, user_fb)
     reference = apply_moves(CubeState.solved(), _fb_frame(1))
 
     assert _fb_cubies_goal(after_fb, reference)
-    assert not _fb_goal(after_fb, reference)
-    assert after_fb.center != reference.center
+    # Other centers differ, but the L center still matches the FB.
+    assert _fb_goal(after_fb, reference)
+    shifted = list(after_fb.center)
+    shifted[4], shifted[0] = shifted[0], shifted[4]
+    invalid_l_center = replace(after_fb, center=tuple(shifted))
+    assert not _fb_goal(invalid_l_center, reference)
 
 
 def test_roux_tracks_centers_at_fb_boundary_without_repair_moves() -> None:
@@ -545,3 +592,32 @@ def test_roux_tracks_centers_at_fb_boundary_without_repair_moves() -> None:
     final_state = apply_moves(cube, result.moves)
     assert first_block_solved(final_state, result.metadata["frame"])
     assert second_block_solved(final_state)
+
+
+def test_roux_fb_regression_tracks_centers_for_reported_scramble() -> None:
+    scramble = "U2 R F2 U2 R2 D' L2 D L2 D' F2 U2 R2 L' F' D U R' B L' D'"
+    cube = scrambled(scramble)
+    result = RouxSolver(fb_timeout_seconds=20, sb_timeout_seconds=20).solve(cube)
+    frame = _fb_frame(result.metadata["frame"])
+    reference = apply_moves(CubeState.solved(), frame)
+    after_fb = apply_moves(cube, result.phases[0].moves)
+
+    assert result.verified is True
+    assert _fb_cubies_goal(after_fb, reference)
+    assert _fb_goal(after_fb, reference)
+    assert result.metadata["fb_center_state"] == after_fb.center
+
+    state = cube
+    phase_states = {}
+    for phase in result.phases:
+        state = apply_moves(state, phase.moves)
+        phase_states[phase.name] = state
+    assert phase_states["First Block"].center[4] == reference.center[4]
+    assert (phase_states["Second Block"].center[1], phase_states["Second Block"].center[4]) == (phase_states["First Block"].center[1], phase_states["First Block"].center[4])
+    assert (phase_states["CMLL"].center[1], phase_states["CMLL"].center[4]) == (phase_states["Second Block"].center[1], phase_states["Second Block"].center[4])
+    assert (phase_states["EO"].center[1], phase_states["EO"].center[4]) == (phase_states["CMLL"].center[1], phase_states["CMLL"].center[4])
+    assert (phase_states["ULUR"].center[1], phase_states["ULUR"].center[4]) == (phase_states["EO"].center[1], phase_states["EO"].center[4])
+    assert (phase_states["L4E"].center[1], phase_states["L4E"].center[4]) == (phase_states["Second Block"].center[1], phase_states["Second Block"].center[4])
+    phase_keys = {"First Block": "fb", "Second Block": "sb", "CMLL": "cmll", "EO": "eo", "ULUR": "ulur", "L4E": "l4e"}
+    for phase_name, phase_key in phase_keys.items():
+        assert phase_states[phase_name].center == result.metadata[f"{phase_key}_state"]["center"]
