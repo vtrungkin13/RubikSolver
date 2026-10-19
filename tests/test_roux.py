@@ -19,6 +19,7 @@ from rubik_solver.solvers.roux import (
     _fb_move_style_score,
     _centers_ready_for_eo_state,
     _LSEFormulaDatabase,
+    _L4EIDAStar,
     _l4e_solved,
     _ulur_solved,
     RouxSolver,
@@ -126,35 +127,30 @@ def test_cmll_database_recognizes_all_42_generated_cases() -> None:
         assert recognized["id"] == entry["id"]
 
 
-def test_l4e_roux_method_vn_table_recognizes_all_cube_state_cases() -> None:
+def test_lse_database_only_contains_eo_and_l4e_uses_idastar() -> None:
+    from dataclasses import replace
     import json
     from pathlib import Path
 
     db_path = Path(__file__).parents[1] / "data" / "lse_algorithms.json"
-    entries = json.loads(db_path.read_text(encoding="utf-8"))["l4e"]
+    data = json.loads(db_path.read_text(encoding="utf-8"))
+    assert set(data) == {"eo"}
+
     target = CubeState.solved()
-    database = _LSEFormulaDatabase()
-    seen = set()
-    cases = []
-
-    for entry in entries:
-        if not entry["id"].startswith("L4E_VN_"):
-            continue
-        algorithm = tuple(entry["algorithm"].split())
+    wrong_center = replace(target, center=(1, 0, 2, 3, 4, 5))
+    assert not _l4e_solved(wrong_center, target)
+    search = _L4EIDAStar(target=target)
+    for algorithm in (
+        ("U2", "M", "U2", "M'"),
+        ("M'", "U2", "M'", "U2", "M2"),
+        ("M", "U2", "M2", "U2", "M'"),
+    ):
         case = apply_moves(target, _cmll_inverse(algorithm))
-        signature = tuple(case.ep.index(target.ep[pos]) for pos in (1, 3, 5, 7))
-        if signature in seen:
-            continue
-        seen.add(signature)
-        cases.append(case)
-
-    assert len(cases) == 12
-    for case in cases:
-        recognized = database.solve_l4e(case, target)
-        assert recognized is not None
-        _, moves = recognized
-        solved = apply_moves(case, moves)
-        assert _l4e_solved(solved, target)
+        moves = search.solve(case)
+        assert all(move in {"M", "M2", "M'", "U", "U2", "U'"} for move in moves)
+        after = apply_moves(case, moves)
+        assert _l4e_solved(after, target)
+        assert after.center == target.center
 
 
 def test_roux_end_to_end_short_scramble() -> None:
@@ -171,6 +167,10 @@ def test_roux_end_to_end_short_scramble() -> None:
     assert result.metadata["status"] == "l4e"
     assert result.metadata["sb_oracle_fallback"] is False
     assert "cmll_case" in result.metadata
+    assert result.metadata["ulur_family"] == "M/U"
+    assert result.metadata["l4e_family"] == "M/U"
+    assert result.metadata["ulur_nodes"] >= 0
+    assert result.metadata["l4e_nodes"] >= 0
 
 
 def test_roux_end_to_end_deterministic_scrambles() -> None:
@@ -196,6 +196,9 @@ def test_roux_end_to_end_deterministic_scrambles() -> None:
         assert after.co == result.metadata["l4e_state"]["co"], scramble
         assert after.ep == result.metadata["l4e_state"]["ep"], scramble
         assert after.eo == result.metadata["l4e_state"]["eo"], scramble
+        reference = apply_moves(CubeState.solved(), frame)
+        assert after.center == reference.center, scramble
+        assert result.metadata["l4e_state"]["center"] == reference.center, scramble
 
 
 def test_regression_scramble_fb_uses_exact_active_frame() -> None:

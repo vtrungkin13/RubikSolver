@@ -81,28 +81,37 @@ Sau khi chọn xong SB, bộ chuẩn hóa cục bộ có thể đổi move cuố
 
 ### 4.1. EO — định hướng cạnh
 
-- Dùng bộ nhận diện công thức EO của LSE trên trạng thái sau CMLL.
+- Trước khi nhận diện EO, kiểm tra tâm U. Nếu tâm U không phải trắng hoặc vàng, áp dụng `M'` một lần, rồi nhận diện EO lại trên trạng thái cube mới sau move này.
+- Nếu có `M'`, move này là phần đầu của phase EO và được nối ngay trước công thức EO trong chuỗi move; không tách thành phase riêng.
+- Dùng bộ nhận diện công thức EO của LSE trên trạng thái sau bước kiểm tra/hiệu chỉnh tâm.
 - Áp dụng công thức được chọn và xác minh mục tiêu EO trước khi tiếp tục. Ghi lại toàn bộ center permutation sau EO; không yêu cầu U/F/D/B giữ nguyên.
+- Điều kiện hoàn thành EO chỉ xét 6 cạnh `UR/UF/UL/UB/DF/DB`: hướng của mặt U/D trên mỗi cạnh phải đúng theo màu trắng/vàng (trong mô hình cubie là hướng cạnh khớp với trạng thái đích). Không yêu cầu đủ cả 12 cạnh được định hướng. Đồng thời, hai tâm U/D phải là trắng và vàng, tức `center[0]` và `center[3]` là cặp màu `{0, 3}`.
+- ULUR bắt buộc giữ nguyên điều kiện EO đã đạt được: sau ULUR, 6 cạnh `UR/UF/UL/UB/DF/DB` vẫn phải đúng hướng và tâm U/D vẫn phải là cặp trắng/vàng. Trạng thái này là một phần của goal và khóa trạng thái tìm kiếm, không chỉ là kiểm tra sau khi đã tìm được lời giải.
 - Không thêm move chỉ để làm các tâm trông như đã trở lại vị trí ban đầu.
 
 ### 4.2. ULUR
 
-- Dùng bộ tìm kiếm IDA* riêng trên tập move `M/U`.
-- Ghi lại chuỗi move, số node đã duyệt và snapshot đầy đủ của center sau ULUR.
+- Dùng bộ tìm kiếm IDA* riêng trên tập move `M/U`; không nhận diện hoặc thực thi công thức ULUR từ database.
+- Heuristic dùng pattern database nội bộ và handoff projection để hướng tìm kiếm tới trạng thái UL/UR hợp lệ.
+- Ghi lại chuỗi move, số node đã duyệt (`ulur_nodes`) và snapshot đầy đủ của center sau ULUR.
 - Xác minh mục tiêu UL/UR trước khi chuyển sang L4E; không yêu cầu toàn bộ center permutation giữ nguyên sau ULUR.
 
 ### 4.3. L4E
 
-- Ưu tiên bộ nhận diện công thức L4E hiện có.
-- Nếu bảng công thức không có trường hợp phù hợp với trạng thái hợp lệ, dùng tìm kiếm trạng thái chính xác cục bộ L4E trên tập `M/U`.
+- Dùng bộ tìm kiếm IDA* riêng trên tập move `M/U`; không sử dụng công thức L4E từ database hoặc đường tìm kiếm BFS dự phòng.
+- Heuristic sử dụng pattern database của bốn cạnh tầng giữa; goal cuối bắt buộc toàn bộ 12 cạnh, 8 góc và cả 6 tâm khớp chính xác trạng thái đích của frame đang dùng.
+- Ghi lại chuỗi move, số node đã duyệt (`l4e_nodes`) và snapshot đầy đủ của center sau L4E.
 - Nhánh này chỉ hoàn tất L4E trong LSE; không phải fallback của SB và không thay thế toàn bộ Roux bằng Kociemba.
-- Xác minh cubie cuối cùng đã giải trong frame đang dùng và ghi lại trạng thái center thực tế sau L4E. Các center U/F/D/B không bị ép về permutation ban đầu nếu thuật toán đã giải đúng mục tiêu cubie; L/R phải giữ nguyên theo quy ước move/frame.
+- Vì L4E là phase cuối, không chấp nhận trạng thái chỉ giải xong cubie: mọi center phải trở về đúng vị trí theo trạng thái đích của frame đang dùng. Trạng thái có cubie đúng nhưng tâm sai không được coi là nghiệm.
+- Khóa transposition của IDA* phải bao gồm cả permutation tâm, để không gộp hai trạng thái có cubie giống nhau nhưng khả năng hoàn thành tâm khác nhau.
+
+`data/lse_algorithms.json` chỉ còn giữ nhóm công thức EO; các nhóm `ulur` và `l4e` đã bị loại bỏ vì hai phase này do IDA* xử lý trực tiếp.
 
 ## 5. Trạng thái phase, metadata và lỗi
 
 Lưu snapshot đầy đủ `cp`, `co`, `ep`, `eo`, `center` tại các mốc `fb_state`, `sb_state`, `cmll_state`, `eo_state`, `ulur_state`, `l4e_state`. Mỗi snapshot phải được tính bằng cách áp dụng đúng chuỗi move lên trạng thái đầu vào của phase, không tái dựng hoặc chuẩn hóa center khi bàn giao.
 
-Thành công cuối cùng đòi hỏi cubie được giải trong frame hoạt động. Nếu một phase lỗi, phải giữ thông tin đủ để xác định chính xác phase đó; không trả kết quả thành công chỉ vì một solver khác có thể giải được cube.
+Thành công cuối cùng đòi hỏi toàn bộ cubie và cả sáu tâm được giải đúng theo frame hoạt động. Nếu một phase lỗi, phải giữ thông tin đủ để xác định chính xác phase đó; không trả kết quả thành công chỉ vì một solver khác có thể giải được cube.
 
 ## 6. Các điều không được làm
 

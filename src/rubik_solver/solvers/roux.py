@@ -459,53 +459,14 @@ def _solve_lse_subphase(
     raise RuntimeError("Roux LSE MU-only search failed")
 
 
-def _solve_l4e_mu(
-    cube: CubeState,
-    target: CubeState,
-) -> tuple[str, ...]:
-    """Exact M/U completion for a legal L4E state not covered by the formula table.
-
-    The published Roux Method VN recognizer remains the primary path. This
-    finite-state fallback is local to L4E (never an SB/direct-cube fallback)
-    and uses the tracked edge/corner projection. Center permutations are
-    retained in the state but do not constrain the L4E cubie goal.
-    """
-    moves = ("M", "M2", "M'", "U", "U2", "U'")
-
-    def key(state: CubeState) -> tuple[int, ...]:
-        return _lse_key(state, target)
-
-    def goal(state: CubeState) -> bool:
-        return _l4e_solved(state, target)
-
-    queue = deque([(cube, ())])
-    seen = {key(cube)}
-    while queue:
-        state, path = queue.popleft()
-        if goal(state):
-            return path
-        previous_face = path[-1][0] if path else None
-        for move in moves:
-            if previous_face is not None and move[0] == previous_face:
-                continue
-            nxt = apply_move(state, move)
-            state_key = key(nxt)
-            if state_key in seen:
-                continue
-            seen.add(state_key)
-            queue.append((nxt, path + (move,)))
-    raise RuntimeError("Roux exact M/U L4E completion failed")
-
-
 @dataclass(slots=True)
 class _ULURIDAStar:
-    """Exact IDA* for UL/UR using only M/M2/M' and U/U2/U'."""
+    """Exact UL/UR IDA* using M/U while preserving the EO boundary."""
 
     target: CubeState
     max_depth: int = 18
     max_nodes: int | None = 10_000_000
     timeout_seconds: float | None = 60.0
-    l4e_database: object | None = None
     nodes: int = field(init=False, default=0)
     started: float = field(init=False, default=0.0)
     path: list[str] = field(init=False, default_factory=list)
@@ -571,10 +532,13 @@ class _ULURIDAStar:
             piece = self.target.ep[pos]
             current = cube.ep.index(piece)
             parts.extend((current, cube.eo[current]))
+        # EO remains a hard invariant across ULUR. UF/UB/DF/DB are free to
+        # permute for L4E, but their U/D-facing orientation bits must survive.
+        parts.extend(cube.eo[pos] for pos in (1, 3, 5, 7))
         return tuple(parts)
 
     def _build_handoff_db(self) -> dict[tuple[int, ...], int]:
-        """Exact distance to the Roux ULUR handoff projection."""
+        """Exact distance to ULUR goals that also preserve EO orientation."""
         goals: list[CubeState] = []
         middle_positions = (1, 3, 5, 7)
         middle_pieces = tuple(self.target.ep[pos] for pos in middle_positions)
@@ -632,7 +596,7 @@ class _ULURIDAStar:
         raise RuntimeError(f"Roux ULUR IDA* failed within depth {self.max_depth}")
 
     def _goal(self, cube: CubeState) -> bool:
-        return _ulur_solved(cube, self.target)
+        return _ulur_solved(cube, self.target) and _eo_solved(cube, self.target)
 
     def _dfs(self, cube: CubeState, depth: int, threshold: int, previous_face: str | None):
         self._check_limits()
@@ -661,6 +625,101 @@ class _ULURIDAStar:
         return None
 
 
+@dataclass(slots=True)
+class _L4EIDAStar:
+    """IDA* for L4E using only M/M2/M' and U/U2/U'."""
+
+    target: CubeState
+    max_depth: int = 18
+    max_nodes: int | None = 10_000_000
+    timeout_seconds: float | None = 60.0
+    nodes: int = field(init=False, default=0)
+    started: float = field(init=False, default=0.0)
+    path: list[str] = field(init=False, default_factory=list)
+    pattern_db: dict[tuple[int, ...], int] = field(init=False, default_factory=dict)
+    transposition: dict[tuple[tuple[int, ...], str | None], int] = field(init=False, default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self.started = monotonic()
+        self.pattern_db = self._build_pattern_db()
+
+    def _pattern_key(self, cube: CubeState) -> tuple[int, ...]:
+        parts: list[int] = []
+        for pos in _L4E_EDGE_GOALS:
+            piece = self.target.ep[pos]
+            current = cube.ep.index(piece)
+            parts.extend((current, cube.eo[current]))
+        return tuple(parts)
+
+    def _build_pattern_db(self) -> dict[tuple[int, ...], int]:
+        """Reverse-BFS distances for the four LSE middle-slice edges."""
+        distances = {self._pattern_key(self.target): 0}
+        queue = deque([self.target])
+        while queue:
+            state = queue.popleft()
+            next_depth = distances[self._pattern_key(state)] + 1
+            for move in _ULUR_MOVES:
+                nxt = apply_move(state, move)
+                key = self._pattern_key(nxt)
+                if key in distances:
+                    continue
+                distances[key] = next_depth
+                queue.append(nxt)
+        return distances
+
+    def _check_limits(self) -> None:
+        if self.max_nodes is not None and self.nodes >= self.max_nodes:
+            raise RuntimeError("Roux L4E IDA* node limit exceeded")
+        if self.timeout_seconds is not None and monotonic() - self.started >= self.timeout_seconds:
+            raise TimeoutError("Roux L4E IDA* timeout exceeded")
+
+    def _heuristic(self, cube: CubeState) -> int:
+        return self.pattern_db[self._pattern_key(cube)]
+
+    def _goal(self, cube: CubeState) -> bool:
+        return _l4e_solved(cube, self.target)
+
+    def solve(self, cube: CubeState) -> tuple[str, ...]:
+        if self._goal(cube):
+            return ()
+        for threshold in range(self._heuristic(cube), self.max_depth + 1):
+            self.transposition.clear()
+            result = self._dfs(cube, 0, threshold, None)
+            if result is not None:
+                return result
+        raise RuntimeError(f"Roux L4E IDA* failed within depth {self.max_depth}")
+
+    def _dfs(self, cube: CubeState, depth: int, threshold: int, previous_face: str | None):
+        self._check_limits()
+        self.nodes += 1
+        if depth + self._heuristic(cube) > threshold:
+            return None
+        if self._goal(cube):
+            return tuple(self.path)
+        if depth == threshold:
+            return None
+        remaining = threshold - depth
+        # The heuristic projection is not a complete search state: U moves
+        # also move the already-solved top-layer cubies temporarily. At this
+        # final phase, centers are part of the goal too, so states with equal
+        # cubies but different center permutations must not be merged.
+        tt_key = (cube.cp + cube.co + cube.ep + cube.eo + cube.center, previous_face)
+        previous_remaining = self.transposition.get(tt_key)
+        if previous_remaining is not None and previous_remaining >= remaining:
+            return None
+        self.transposition[tt_key] = remaining
+        for move in _ULUR_MOVES:
+            face = move[0]
+            if previous_face is not None and face == previous_face:
+                continue
+            self.path.append(move)
+            result = self._dfs(apply_move(cube, move), depth + 1, threshold, face)
+            self.path.pop()
+            if result is not None:
+                return result
+        return None
+
+
 def _centers_ready_for_eo_state(cube: CubeState) -> bool:
     """Return whether the U/D center positions contain the white/yellow pair."""
     return {cube.center[0], cube.center[3]} == {0, 3}
@@ -671,7 +730,17 @@ def _edges_solved(cube: CubeState, target: CubeState, positions: tuple[int, ...]
 
 
 def _eo_solved(cube: CubeState, target: CubeState) -> bool:
-    return all(cube.eo[pos] == target.eo[pos] for pos in range(12))
+    """EO is complete when the six Roux-relevant edges are oriented.
+
+    Only the four U-layer edges and DF/DB matter at this boundary. The
+    U/D centers must also occupy the white/yellow axis; the other six edges
+    are deliberately not part of the EO completion predicate.
+    """
+    relevant_edges = (0, 1, 2, 3, 5, 7)  # UR, UF, UL, UB, DF, DB
+    return (
+        _centers_ready_for_eo_state(cube)
+        and all(cube.eo[pos] == target.eo[pos] for pos in relevant_edges)
+    )
 
 
 _ULUR_MOVES = ("M", "M2", "M'", "U", "U2", "U'")
@@ -693,7 +762,15 @@ def _ulur_solved(cube: CubeState, target: CubeState) -> bool:
 
 
 def _l4e_solved(cube: CubeState, target: CubeState) -> bool:
-    return _edges_solved(cube, target, tuple(range(12))) and all(cube.cp[pos] == target.cp[pos] and cube.co[pos] == target.co[pos] for pos in range(8))
+    """L4E is complete only when every cubie and all six centers match target."""
+    return (
+        _edges_solved(cube, target, tuple(range(12)))
+        and all(
+            cube.cp[pos] == target.cp[pos] and cube.co[pos] == target.co[pos]
+            for pos in range(8)
+        )
+        and cube.center == target.center
+    )
 
 
 
@@ -702,15 +779,12 @@ def _lse_u_turn(power: int) -> tuple[str, ...]:
 
 
 class _LSEFormulaDatabase:
-    """Recognition/execution for the published Roux LSE formula sets."""
+    """EO formula database; ULUR and L4E are solved by dedicated IDA* searches."""
 
     def __init__(self) -> None:
         with _LSE_DB_PATH.open("r", encoding="utf-8") as handle:
             data = json.load(handle)
         self.eo = tuple(data["eo"])
-        self.ulur = tuple(data["ulur"])
-        self.l4e = tuple(data["l4e"])
-        self.l4e_vn = tuple(entry for entry in self.l4e if entry["family"].startswith("roux_method_vn"))
 
     @staticmethod
     def _moves(entry: dict) -> tuple[str, ...]:
@@ -738,55 +812,6 @@ class _LSEFormulaDatabase:
             return {"id": "INTUITIVE_MU", "family": "MU-only", "algorithm": ""}, _solve_eo_intuitive(cube, target)
         return result
 
-    def solve_ulur_formula(self, cube: CubeState, target: CubeState):
-        centered_goal = lambda state, goal_target: _ulur_solved(state, goal_target)
-        if centered_goal(cube, target):
-            return {"id": "SOLVED", "family": "SOLVED", "algorithm": ""}, ()
-        return self._try_phase(cube, target, self.ulur, centered_goal)
-
-    def solve_l4e(
-        self, cube: CubeState, target: CubeState,
-    ):
-        centered_goal = lambda state, goal_target: _l4e_solved(state, goal_target)
-        if centered_goal(cube, target):
-            return {"id": "SOLVED", "family": "SOLVED", "algorithm": ""}, ()
-        # The Roux Method VN L4E page is a finite recognition table.  Its
-        # 8 + 8 + special cases collapse to the 12 distinct edge permutations
-        # represented by CubeState (centers/sticker colours are not modeled).
-        # Recognize those cases directly with AUF, then execute the published
-        # formula.  Do not turn this into a generic MU search: that would hide
-        # recognition errors and violate the formula-driven L4E contract.
-        result = self._try_phase(cube, target, self.l4e_vn, centered_goal)
-        if result is not None:
-            return result
-
-        # Ez L4E uses the documented steering macros to turn awkward cases
-        # into one of the easy published cases. Keep this as a second-stage
-        # recognizer, not an arbitrary search: every terminal solve still has
-        # to be one of the Roux Method VN formula entries above.
-        steering = (
-            ("U", "M2", "U"),
-            ("U", "M2", "U'"),
-            ("U'", "M2", "U"),
-            ("U'", "M2", "U'"),
-            ("U2", "M2", "U2"),
-            ("U2", "M2", "U2", "M2"),
-            ("M", "U2", "M"),
-            ("M'", "U2", "M"),
-            ("M", "U2", "M'"),
-            ("M'", "U2", "M'"),
-            ("E2", "M", "E2", "M"),
-            ("E2", "M'", "E2", "M'"),
-        )
-        for setup in steering:
-            rotated = apply_moves(cube, setup)
-            result = self._try_phase(rotated, target, self.l4e_vn, centered_goal)
-            if result is not None:
-                entry, moves = result
-                return entry, setup + moves
-        return None
-
-
 def _solve_ulur_intuitive(cube: CubeState, target: CubeState) -> tuple[str, ...]:
     """Use the documented Roux <M,U2> ULUR procedure when no simple alg matches."""
     if _ulur_solved(cube, target):
@@ -802,6 +827,7 @@ def _solve_ulur_intuitive(cube: CubeState, target: CubeState) -> tuple[str, ...]
         for piece in tuple(target.cp[pos] for pos in _CMLL_CORNER_GOALS):
             pos = state.cp.index(piece)
             parts.extend((pos, state.co[pos]))
+        parts.extend(state.center)
         return tuple(parts)
 
     queue = deque([(cube, ())])
@@ -2391,7 +2417,19 @@ class RouxSolver(Solver):
             raise RuntimeError("Roux CMLL failed corner or fixed R/L center verification")
 
         lse = _LSEFormulaDatabase()
-        eo_case, eo_moves = lse.solve_eo(cmll_after, candidate_reference)
+        # EO handoff: the U center must be white or yellow. If neither is on U,
+        # apply M' first, then recognize EO from the resulting real cube state.
+        # Keep this setup move inside the EO phase so it executes immediately
+        # before the selected EO algorithm.
+        eo_setup_moves: tuple[str, ...] = ()
+        eo_input = cmll_after
+        if eo_input.center[0] not in (0, 3):
+            eo_setup_moves = ("M'",)
+            eo_input = apply_moves(eo_input, eo_setup_moves)
+        if eo_input.center[0] not in (0, 3):
+            raise RuntimeError("Roux EO handoff failed to place the white/yellow center on U after M'")
+        eo_case, recognized_eo_moves = lse.solve_eo(eo_input, candidate_reference)
+        eo_moves = eo_setup_moves + tuple(recognized_eo_moves)
         eo_after = apply_moves(cmll_after, eo_moves)
         if (
             not _roux_blocks_and_cmll_solved(eo_after, candidate_reference)
@@ -2400,7 +2438,7 @@ class RouxSolver(Solver):
         ):
             raise RuntimeError("Roux EO failed block/CMLL preservation, edge orientation, or fixed R/L center verification")
 
-        ulur_search = _ULURIDAStar(target=candidate_reference, l4e_database=lse)
+        ulur_search = _ULURIDAStar(target=candidate_reference)
         ulur_moves = ulur_search.solve(eo_after)
         ulur_case = {
             "id": "IDA_STAR",
@@ -2412,30 +2450,24 @@ class RouxSolver(Solver):
         if not _ulur_solved(ulur_after, candidate_reference) or (ulur_after.center[1], ulur_after.center[4]) != (eo_after.center[1], eo_after.center[4]):
             raise RuntimeError("Roux ULUR failed UL/UR or fixed R/L center verification")
 
-        l4e_formula = lse.solve_l4e(ulur_after, candidate_reference)
-        if l4e_formula is None:
-            # Keep the published formula recognizer as the primary path. If
-            # its finite table cannot represent this valid L4E state, finish
-            # within LSE using exact M/U search rather than reopening SB or
-            # replacing the requested Roux solution with Kociemba.
-            l4e_moves = _solve_l4e_mu(ulur_after, candidate_reference)
-            l4e_case = {
-                "id": "EXACT_MU_FALLBACK",
-                "family": "M/U exact state search",
-                "algorithm": " ".join(l4e_moves),
-            }
-        else:
-            l4e_case, l4e_moves = l4e_formula
+        l4e_search = _L4EIDAStar(target=candidate_reference)
+        l4e_moves = l4e_search.solve(ulur_after)
+        l4e_case = {
+            "id": "IDA_STAR",
+            "family": "M/U",
+            "algorithm": " ".join(l4e_moves),
+            "nodes": l4e_search.nodes,
+        }
         l4e_after = apply_moves(ulur_after, l4e_moves)
-        if not _l4e_solved(l4e_after, candidate_reference) or (l4e_after.center[1], l4e_after.center[4]) != (candidate_after.center[1], candidate_after.center[4]):
-            raise RuntimeError("Roux L4E failed cubie or fixed R/L center verification")
+        if not _l4e_solved(l4e_after, candidate_reference):
+            raise RuntimeError("Roux L4E failed full cube verification: cubies or one/more centers do not match the active frame")
         if (l4e_after.cp, l4e_after.co, l4e_after.ep, l4e_after.eo) != (
             candidate_reference.cp, candidate_reference.co,
             candidate_reference.ep, candidate_reference.eo,
         ):
             raise RuntimeError("Roux LSE completed but cubies do not match the active frame")
-        # M/r moves may permute the four middle-layer centers. The R/L centers
-        # remain fixed, while each full center permutation is recorded below.
+        # L4E is the final phase: require the complete physical cube state to
+        # match the active-frame target, including all six centers.
 
         all_moves = (
             tuple(candidate_fb) + candidate_sb_moves + tuple(cmll_moves)
@@ -2482,14 +2514,14 @@ class RouxSolver(Solver):
                 SolutionPhase(
                     name="L4E",
                     moves=tuple(l4e_moves),
-                    description="Solve the final four edges using the existing L4E formula database.",
+                    description="Solve the final four edges with dedicated IDA* using only M/U moves.",
                 ),
             ),
             metadata={
                 "status": "l4e",
                 "verification_scope": "first_block+second_block+cmll+eo+ulur+l4e",
-                "center_verification": "exact-phase-snapshots; FB-L; later-phases-preserve-RL",
-                "search": "recognition-first staged FB/SB followed by existing CMLL and LSE solvers; no direct SB fallback",
+                "center_verification": "exact-phase-snapshots; final-L4E-requires-all-six-centers-match-active-frame",
+                "search": "staged FB/SB, CMLL and EO database, dedicated M/U IDA* for ULUR and L4E; no direct SB fallback",
                 "fb_nodes": candidate_search if isinstance(candidate_search, int) else candidate_search.nodes,
                 "sb_nodes": staged_sb.nodes,
                 "depth": len(all_moves),
@@ -2545,8 +2577,10 @@ class RouxSolver(Solver):
                 "eo_family": eo_case["family"],
                 "ulur_case": ulur_case["id"],
                 "ulur_family": ulur_case["family"],
+                "ulur_nodes": ulur_search.nodes,
                 "l4e_case": l4e_case["id"],
                 "l4e_family": l4e_case["family"],
+                "l4e_nodes": l4e_search.nodes,
                 "frame": candidate_frame,
                 "fb_setup_moves": _fb_frame(candidate_frame),
                 "fb_construction_moves": tuple(candidate_fb[len(_fb_frame(candidate_frame)):]),
